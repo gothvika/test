@@ -9,16 +9,16 @@ source (prices, screener, momentum, market-hours clock); Trading212's
 public API has no confirmed screener or historical-bars equivalent, so it
 handles order execution only.
 
-Docs: https://docs.trading212.com/api (site is not fetchable from this
-dev environment — endpoints below were confirmed via a third-party SDK's
-source and cross-referenced against independent docs mirrors, not
-against a live call. Verify your first real order carefully.)
+Docs: https://docs.trading212.com/api (site is not fetchable from the dev
+environment this was built in; auth, instrument lookup, and order
+placement have since been verified against the live demo API).
 """
 
 import base64
 import json
 import logging
 import os
+import re
 import time
 
 import requests
@@ -99,6 +99,15 @@ def _get_ticker_map() -> dict[str, str]:
     return ticker_map
 
 
+_MIN_QUANTITY_RE = re.compile(r"must trade at least ([\d.]+)")
+
+
+def _post_market_order(ticker: str, quantity: float) -> requests.Response:
+    url = f"{config.TRADING212_BASE_URL}/api/v0/equity/orders/market"
+    headers = {**_auth_header(), "Content-Type": "application/json"}
+    return requests.post(url, headers=headers, json={"ticker": ticker, "quantity": quantity}, timeout=15)
+
+
 def buy_dollar_amount(symbol: str, dollars: float) -> dict:
     """
     Submits a market buy order for approximately `dollars` worth of
@@ -108,8 +117,15 @@ def buy_dollar_amount(symbol: str, dollars: float) -> dict:
     mapping, no price is available, or the order request fails.
 
     Trading212's market-order endpoint is documented as NOT idempotent
-    in beta — do not add automatic retries here, a retried request can
-    duplicate the order.
+    in beta, so this never blindly retries an ambiguous failure (timeout,
+    5xx) — that could duplicate an order that actually went through. The
+    one exception: a clean 400 min-quantity-exceeded rejection is
+    confirmed pre-execution (Trading212 validates and rejects before
+    placing anything), so retrying once at the stated minimum is safe —
+    small/cheap stocks like a $1 DCA buy routinely fall under
+    per-instrument minimums that aren't published anywhere in advance
+    (confirmed live: SOFI's minimum is ~$1.34 at ~$17/share, well above
+    the $1.00 default).
     """
     ticker_map = _get_ticker_map()
     ticker = ticker_map.get(symbol)
@@ -122,12 +138,29 @@ def buy_dollar_amount(symbol: str, dollars: float) -> dict:
         raise ValueError(f"Could not fetch a live price for {symbol} to size the order")
 
     quantity = round(dollars / price, 5)  # Trading212 supports fractional shares
+    resp = _post_market_order(ticker, quantity)
 
-    url = f"{config.TRADING212_BASE_URL}/api/v0/equity/orders/market"
-    headers = {**_auth_header(), "Content-Type": "application/json"}
-    payload = {"ticker": ticker, "quantity": quantity}
+    if resp.status_code == 400:
+        try:
+            body = resp.json()
+        except ValueError:
+            body = {}
+        match = (
+            _MIN_QUANTITY_RE.search(body.get("detail", ""))
+            if body.get("type") == "/api-errors/min-quantity-exceeded"
+            else None
+        )
+        if match:
+            min_quantity = round(float(match.group(1)) * 1.0005, 5)  # tiny margin over the stated floor
+            logger.warning(
+                "%s: %.5f shares ($%.2f) is below Trading212's minimum — retrying once at "
+                "%.5f shares (~$%.2f). This is a single retry after a confirmed "
+                "pre-execution rejection, not a blind retry of a possibly-placed order.",
+                symbol, quantity, dollars, min_quantity, min_quantity * price,
+            )
+            quantity = min_quantity
+            resp = _post_market_order(ticker, quantity)
 
-    resp = requests.post(url, headers=headers, json=payload, timeout=15)
     if resp.status_code >= 400:
         logger.error("Order failed for %s: %s — %s", symbol, resp.status_code, resp.text)
         resp.raise_for_status()
@@ -135,7 +168,7 @@ def buy_dollar_amount(symbol: str, dollars: float) -> dict:
     order = resp.json()
     logger.info(
         "Order submitted: %s $%.2f (%.5f shares of %s) -> order id %s",
-        symbol, dollars, quantity, ticker, order.get("id"),
+        symbol, quantity * price, quantity, ticker, order.get("id"),
     )
     return order
 
