@@ -5,6 +5,8 @@ business description, via the Financial Modeling Prep free API.
 Docs: https://site.financialmodelingprep.com/developer/docs
 """
 
+from __future__ import annotations  # `float | None` syntax needs this on Python < 3.10
+
 import logging
 import requests
 import config
