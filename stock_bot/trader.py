@@ -67,8 +67,17 @@ def _get_raw_instruments() -> list[dict]:
 
 def _get_ticker_map() -> dict[str, str]:
     """
-    Returns {bare_symbol: trading212_ticker}, e.g. {"AAPL": "AAPL_US_EQ"}.
+    Returns {bare_symbol: trading212_ticker}, e.g. {"SOFI": "IPOE_US_EQ"}.
     Cached in-process for the life of the run on top of the on-disk cache.
+
+    Keyed by Trading212's `shortName` field, NOT parsed from `ticker` —
+    `ticker` codes are sometimes legacy identifiers unrelated to the
+    current trading symbol (confirmed live: SoFi Technologies' ticker is
+    "IPOE_US_EQ", left over from its pre-merger SPAC ticker; `shortName`
+    "SOFI" is the actual current symbol). Restricted to type=="STOCK" and
+    currencyCode=="USD" to skip leveraged/inverse ETF look-alikes (e.g.
+    "AAPY"/"TSLI" options-income ETFs riding on Apple/Tesla's name) and
+    non-US listings of the same company.
     """
     global _instrument_cache
     if _instrument_cache is not None:
@@ -78,10 +87,12 @@ def _get_ticker_map() -> dict[str, str]:
 
     ticker_map = {}
     for row in instruments:
+        if row.get("type") != "STOCK" or row.get("currencyCode") != "USD":
+            continue
+        short_name = row.get("shortName", "")
         ticker = row.get("ticker", "")
-        bare_symbol = ticker.split("_")[0]
-        if bare_symbol:
-            ticker_map[bare_symbol] = ticker
+        if short_name and ticker:
+            ticker_map.setdefault(short_name, ticker)
 
     _instrument_cache = ticker_map
     logger.info("Cached %d Trading212 instrument tickers", len(ticker_map))
