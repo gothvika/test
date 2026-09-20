@@ -63,7 +63,7 @@ def get_latest_prices(symbols: list[str]) -> dict[str, float]:
         "APCA-API-KEY-ID": config.ALPACA_API_KEY,
         "APCA-API-SECRET-KEY": config.ALPACA_SECRET_KEY,
     }
-    params = {"symbols": ",".join(symbols)}
+    params = {"symbols": ",".join(symbols), "feed": config.ALPACA_DATA_FEED}
 
     resp = requests.get(url, headers=headers, params=params, timeout=15)
     resp.raise_for_status()
@@ -100,6 +100,7 @@ def get_momentum(symbols: list[str], lookback_days: int = None) -> dict[str, flo
         "end": end.isoformat(),
         "limit": lookback_days + 10,
         "adjustment": "split",
+        "feed": config.ALPACA_DATA_FEED,
     }
 
     resp = requests.get(url, headers=headers, params=params, timeout=15)

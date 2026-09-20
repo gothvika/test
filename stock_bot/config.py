@@ -25,6 +25,8 @@ Optional:
   SHORTLIST_SIZE          - how many candidates advance to deep AI research
                             (fundamentals + CEO + prospects), default 20.
                             Keep this modest — each one costs an API call.
+  ALPACA_DATA_FEED        - "iex" (default, free/paper accounts) or "sip"
+                            (needs a paid market-data subscription)
   MAX_STOCK_PRICE         - only consider stocks trading below this price,
                             default 30.00
   MOMENTUM_LOOKBACK_DAYS  - trading-day window used to compute price
@@ -64,6 +66,9 @@ ALPACA_TRADING_BASE_URL = (
     "https://paper-api.alpaca.markets" if ALPACA_PAPER else "https://api.alpaca.markets"
 )
 ALPACA_DATA_BASE_URL = "https://data.alpaca.markets"
+# "iex" works on free/paper accounts; "sip" needs a paid market-data
+# subscription and 403s otherwise.
+ALPACA_DATA_FEED = os.getenv("ALPACA_DATA_FEED", "iex")
 
 X_BEARER_TOKEN = os.getenv("X_BEARER_TOKEN", "")
 X_API_BASE_URL = "https://api.x.com/2"
