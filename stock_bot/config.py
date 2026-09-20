@@ -13,6 +13,11 @@ Required environment variables:
   ANTHROPIC_API_KEY      - Claude API key (console.anthropic.com) — used to
                             research each shortlisted company's CEO, recent
                             news, and future prospects via web search
+  ANTHROPIC_MODEL         - default "claude-haiku-4-5" (cost-optimized;
+                            roughly half the per-call cost of Sonnet 5, at
+                            some loss of research nuance on ambiguous
+                            calls). Set to "claude-sonnet-5" for better
+                            judgment on close cases at higher cost.
   FMP_API_KEY             - Financial Modeling Prep API key (free tier at
                             financialmodelingprep.com) — used for company
                             fundamentals: market cap, P/E, sector, CEO name
@@ -23,7 +28,7 @@ Optional:
   CANDIDATE_POOL_SIZE    - how many "most active" symbols to pull before
                             scoring, default 50
   SHORTLIST_SIZE          - how many candidates advance to deep AI research
-                            (fundamentals + CEO + prospects), default 20.
+                            (fundamentals + CEO + prospects), default 12.
                             Keep this modest — each one costs an API call.
   ALPACA_DATA_FEED        - "iex" (default, free/paper accounts) or "sip"
                             (needs a paid market-data subscription)
@@ -74,7 +79,7 @@ X_BEARER_TOKEN = os.getenv("X_BEARER_TOKEN", "")
 X_API_BASE_URL = "https://api.x.com/2"
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5")
 
 FMP_API_KEY = os.getenv("FMP_API_KEY", "")
 # FMP's old /api/v3/ endpoints are legacy-only (need a subscription predating

@@ -105,13 +105,9 @@ def research_company(profile: dict) -> dict:
 
     try:
         client = _get_client()
-        response = client.messages.create(
+        request_kwargs = dict(
             model=config.ANTHROPIC_MODEL,
             max_tokens=2048,
-            # effort="medium" cuts cost ~15-30% on research/knowledge-shaped
-            # tasks like this one, per Anthropic's published effort-sweep
-            # results, without a measurable accuracy hit.
-            output_config={"effort": "medium"},
             tools=[
                 # _20260209 has built-in dynamic filtering, which strips
                 # boilerplate from search results before they enter context —
@@ -123,6 +119,15 @@ def research_company(profile: dict) -> dict:
             ],
             messages=[{"role": "user", "content": prompt}],
         )
+        # effort="medium" cuts cost ~15-30% on research/knowledge-shaped
+        # tasks like this one on models that support it, per Anthropic's
+        # published effort-sweep results, without a measurable accuracy
+        # hit. Haiku 4.5 doesn't accept this parameter at all (errors) —
+        # only add it for models that do.
+        if "haiku" not in config.ANTHROPIC_MODEL:
+            request_kwargs["output_config"] = {"effort": "medium"}
+
+        response = client.messages.create(**request_kwargs)
 
         result_block = next(
             (
