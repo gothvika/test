@@ -17,6 +17,7 @@ placement have since been verified against the live demo API).
 import base64
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -100,12 +101,19 @@ def _get_ticker_map() -> dict[str, str]:
 
 
 _MIN_QUANTITY_RE = re.compile(r"must trade at least ([\d.]+)")
+_PRECISION_RE = re.compile(r"invalid quantity precision (\d+)")
+_MAX_ORDER_ATTEMPTS = 4
 
 
 def _post_market_order(ticker: str, quantity: float) -> requests.Response:
     url = f"{config.TRADING212_BASE_URL}/api/v0/equity/orders/market"
     headers = {**_auth_header(), "Content-Type": "application/json"}
     return requests.post(url, headers=headers, json={"ticker": ticker, "quantity": quantity}, timeout=15)
+
+
+def _round_up(value: float, decimals: int) -> float:
+    factor = 10 ** decimals
+    return math.ceil(value * factor) / factor
 
 
 def buy_dollar_amount(symbol: str, dollars: float) -> dict:
@@ -116,16 +124,20 @@ def buy_dollar_amount(symbol: str, dollars: float) -> dict:
     response JSON. Raises if the symbol has no Trading212 instrument
     mapping, no price is available, or the order request fails.
 
-    Trading212's market-order endpoint is documented as NOT idempotent
-    in beta, so this never blindly retries an ambiguous failure (timeout,
+    Trading212's market-order endpoint is documented as NOT idempotent in
+    beta, so this never blindly retries an ambiguous failure (timeout,
     5xx) — that could duplicate an order that actually went through. The
-    one exception: a clean 400 min-quantity-exceeded rejection is
-    confirmed pre-execution (Trading212 validates and rejects before
-    placing anything), so retrying once at the stated minimum is safe —
-    small/cheap stocks like a $1 DCA buy routinely fall under
-    per-instrument minimums that aren't published anywhere in advance
-    (confirmed live: SOFI's minimum is ~$1.34 at ~$17/share, well above
-    the $1.00 default).
+    exception: Trading212 enforces two per-instrument constraints not
+    published anywhere in advance — a minimum share quantity (confirmed
+    live: SOFI needs >=~0.079 shares, ~$1.34 at ~$17/share, well above a
+    $1.00 DCA buy) and a maximum quantity decimal precision (confirmed
+    live: SOFI allows only 3 decimals). Both come back as a clean 400,
+    confirmed pre-execution, so retrying with a corrected quantity is
+    safe. Since fixing one constraint can trigger the other (observed
+    live: bumping quantity to the minimum produced 5 decimals, which then
+    violated precision), this retries a bounded number of times, always
+    rounding the quantity UP so a precision fix can never drop back below
+    a minimum already satisfied.
     """
     ticker_map = _get_ticker_map()
     ticker = ticker_map.get(symbol)
@@ -138,28 +150,51 @@ def buy_dollar_amount(symbol: str, dollars: float) -> dict:
         raise ValueError(f"Could not fetch a live price for {symbol} to size the order")
 
     quantity = round(dollars / price, 5)  # Trading212 supports fractional shares
-    resp = _post_market_order(ticker, quantity)
+    resp = None
 
-    if resp.status_code == 400:
+    for attempt in range(_MAX_ORDER_ATTEMPTS):
+        resp = _post_market_order(ticker, quantity)
+        if resp.status_code < 400:
+            break
+
+        if resp.status_code != 400:
+            break  # not a validation error we know how to correct
+
         try:
             body = resp.json()
         except ValueError:
             body = {}
-        match = (
-            _MIN_QUANTITY_RE.search(body.get("detail", ""))
-            if body.get("type") == "/api-errors/min-quantity-exceeded"
-            else None
-        )
-        if match:
-            min_quantity = round(float(match.group(1)) * 1.0005, 5)  # tiny margin over the stated floor
+        error_type = body.get("type", "")
+        detail = body.get("detail", "")
+
+        if error_type == "/api-errors/min-quantity-exceeded":
+            match = _MIN_QUANTITY_RE.search(detail)
+            if not match:
+                break
+            new_quantity = round(float(match.group(1)) * 1.0005, 5)  # tiny margin over the floor
             logger.warning(
-                "%s: %.5f shares ($%.2f) is below Trading212's minimum — retrying once at "
-                "%.5f shares (~$%.2f). This is a single retry after a confirmed "
-                "pre-execution rejection, not a blind retry of a possibly-placed order.",
-                symbol, quantity, dollars, min_quantity, min_quantity * price,
+                "%s: %.5f shares is below Trading212's minimum — retrying at %.5f shares "
+                "(attempt %d/%d, confirmed pre-execution rejection).",
+                symbol, quantity, new_quantity, attempt + 1, _MAX_ORDER_ATTEMPTS,
             )
-            quantity = min_quantity
-            resp = _post_market_order(ticker, quantity)
+            quantity = new_quantity
+            continue
+
+        if error_type == "/api-errors/quantity-precision-mismatch":
+            match = _PRECISION_RE.search(detail)
+            if not match:
+                break
+            decimals = int(match.group(1))
+            new_quantity = _round_up(quantity, decimals)
+            logger.warning(
+                "%s: quantity %.5f exceeds max precision (%d decimals) — retrying at %s "
+                "(attempt %d/%d, confirmed pre-execution rejection).",
+                symbol, quantity, decimals, new_quantity, attempt + 1, _MAX_ORDER_ATTEMPTS,
+            )
+            quantity = new_quantity
+            continue
+
+        break  # some other validation error — not ours to correct
 
     if resp.status_code >= 400:
         logger.error("Order failed for %s: %s — %s", symbol, resp.status_code, resp.text)
