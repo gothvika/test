@@ -67,6 +67,11 @@ Optional:
 
 import os
 
+from dotenv import load_dotenv
+
+load_dotenv()  # loads .env into the environment if present; safe no-op otherwise
+
+
 def _bool_env(name: str, default: bool) -> bool:
     val = os.getenv(name)
     if val is None:
