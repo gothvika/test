@@ -3,20 +3,18 @@ Configuration — reads all secrets from environment variables.
 Never hardcode API keys in source files.
 
 Required environment variables:
-  ALPACA_API_KEY        - your Alpaca API key. Alpaca is kept as the
+  ALPACA_API_KEY        - your Alpaca API key. Used both as the
                            market-data source (screener, prices, momentum,
-                           market-hours clock) even though Trading212
-                           executes the actual buy orders.
+                           market-hours clock) and to execute buy orders.
+                           (Trading212 was evaluated as an alternate order
+                           executor but its public API can't place orders
+                           in a currency other than the account's primary
+                           one — no USD orders on a GBP account — so this
+                           stays on Alpaca.)
   ALPACA_SECRET_KEY     - your Alpaca API secret
-  ALPACA_PAPER          - "true" (default) or "false". Governs the Alpaca
-                           data feed only — order execution safety is
-                           controlled by TRADING212_PAPER instead.
-  TRADING212_API_KEY     - Trading212 Public API key (Settings -> API in
-                            the app). Places the actual buy orders.
-  TRADING212_API_SECRET  - Trading212 Public API secret
-  TRADING212_PAPER        - "true" (default) or "false". KEEP THIS "true"
-                            until you've watched the bot run correctly —
-                            "false" places real orders with real money.
+  ALPACA_PAPER          - "true" (default) or "false". KEEP THIS "true"
+                           until you've watched the bot run correctly —
+                           "false" places real orders with real money.
   X_BEARER_TOKEN         - X (Twitter) API v2 app-only bearer token, from a
                             billed developer account (developer.x.com) — the
                             recent-search endpoint has no free tier as of 2026
@@ -89,13 +87,6 @@ ALPACA_DATA_BASE_URL = "https://data.alpaca.markets"
 # "iex" works on free/paper accounts; "sip" needs a paid market-data
 # subscription and 403s otherwise.
 ALPACA_DATA_FEED = os.getenv("ALPACA_DATA_FEED", "iex")
-
-TRADING212_API_KEY = os.getenv("TRADING212_API_KEY", "")
-TRADING212_API_SECRET = os.getenv("TRADING212_API_SECRET", "")
-TRADING212_PAPER = _bool_env("TRADING212_PAPER", True)
-TRADING212_BASE_URL = (
-    "https://demo.trading212.com" if TRADING212_PAPER else "https://live.trading212.com"
-)
 
 X_BEARER_TOKEN = os.getenv("X_BEARER_TOKEN", "")
 X_API_BASE_URL = "https://api.x.com/2"

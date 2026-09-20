@@ -10,9 +10,9 @@ Run via cron (example, weekdays at 3:45pm ET while market is open):
     45 15 * * 1-5 cd /path/to/stock_bot && /usr/bin/python3 main.py >> cron.log 2>&1
 
 Safety:
-  - Defaults to Trading212's demo/paper endpoint (config.TRADING212_PAPER=
-    True). Nothing here touches real money until you deliberately set
-    TRADING212_PAPER=false in your environment.
+  - Defaults to Alpaca's PAPER trading endpoint (config.ALPACA_PAPER=True).
+    Nothing here touches real money until you deliberately set
+    ALPACA_PAPER=false in your environment.
   - Keeps a small on-disk record (last_run.json) so re-running the script
     on the same calendar day won't buy twice.
   - Skips the run (without buying anything) if the market is closed.
@@ -56,8 +56,6 @@ def main():
         name for name, val in [
             ("ALPACA_API_KEY", config.ALPACA_API_KEY),
             ("ALPACA_SECRET_KEY", config.ALPACA_SECRET_KEY),
-            ("TRADING212_API_KEY", config.TRADING212_API_KEY),
-            ("TRADING212_API_SECRET", config.TRADING212_API_SECRET),
             ("ANTHROPIC_API_KEY", config.ANTHROPIC_API_KEY),
             ("FMP_API_KEY", config.FMP_API_KEY),
         ] if not val
@@ -78,7 +76,7 @@ def main():
                      "during market hours (9:30am-4:00pm ET, Mon-Fri).")
         return
 
-    mode = "PAPER" if config.TRADING212_PAPER else "LIVE"
+    mode = "PAPER" if config.ALPACA_PAPER else "LIVE"
     logger.info("=== Starting daily run (%s trading) ===", mode)
 
     try:
