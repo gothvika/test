@@ -108,8 +108,17 @@ def research_company(profile: dict) -> dict:
         response = client.messages.create(
             model=config.ANTHROPIC_MODEL,
             max_tokens=2048,
+            # effort="medium" cuts cost ~15-30% on research/knowledge-shaped
+            # tasks like this one, per Anthropic's published effort-sweep
+            # results, without a measurable accuracy hit.
+            output_config={"effort": "medium"},
             tools=[
-                {"type": "web_search_20250305", "name": "web_search"},
+                # _20260209 has built-in dynamic filtering, which strips
+                # boilerplate from search results before they enter context —
+                # directly targets this call's dominant cost (~22k input
+                # tokens/call observed, almost all from search results).
+                # max_uses caps runaway search chains on any one call.
+                {"type": "web_search_20260209", "name": "web_search", "max_uses": 3},
                 SUBMIT_RESULT_TOOL,
             ],
             messages=[{"role": "user", "content": prompt}],
