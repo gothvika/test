@@ -7,9 +7,9 @@ Required environment variables:
   ALPACA_SECRET_KEY     - your Alpaca API secret
   ALPACA_PAPER          - "true" (default) or "false". KEEP THIS "true" until
                            you've watched the bot run correctly for a while.
-  REDDIT_CLIENT_ID       - Reddit app client id (from reddit.com/prefs/apps)
-  REDDIT_CLIENT_SECRET   - Reddit app secret
-  REDDIT_USER_AGENT      - e.g. "stock-activity-bot/1.0 by u/yourname"
+  X_BEARER_TOKEN         - X (Twitter) API v2 app-only bearer token, from a
+                            billed developer account (developer.x.com) — the
+                            recent-search endpoint has no free tier as of 2026
   ANTHROPIC_API_KEY      - Claude API key (console.anthropic.com) — used to
                             research each shortlisted company's CEO, recent
                             news, and future prospects via web search
@@ -35,7 +35,11 @@ Optional:
                             (Alpaca's screener only exposes rank order, not
                             raw share counts, so this is relative, not an
                             absolute volume ceiling)
-  WEIGHT_REDDIT           - default 0.15
+  X_LOOKBACK_HOURS        - how far back to search X mentions, default 24
+  X_MAX_RESULTS_PER_QUERY - posts fetched per search batch (max 100 on the
+                            recent-search endpoint), default 100
+  WEIGHT_X                - default 0.15 — higher X mention count scores
+                            better
   WEIGHT_MOMENTUM         - default 0.20 — higher trailing price momentum
                             scores better
   WEIGHT_ROE              - default 0.20 — higher return on equity (TTM,
@@ -61,9 +65,8 @@ ALPACA_TRADING_BASE_URL = (
 )
 ALPACA_DATA_BASE_URL = "https://data.alpaca.markets"
 
-REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID", "")
-REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
-REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "stock-activity-bot/1.0")
+X_BEARER_TOKEN = os.getenv("X_BEARER_TOKEN", "")
+X_API_BASE_URL = "https://api.x.com/2"
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
@@ -80,14 +83,13 @@ MAX_STOCK_PRICE = float(os.getenv("MAX_STOCK_PRICE", "30.00"))
 MOMENTUM_LOOKBACK_DAYS = int(os.getenv("MOMENTUM_LOOKBACK_DAYS", "20"))
 
 WEIGHT_VOLUME = float(os.getenv("WEIGHT_VOLUME", "0.10"))
-WEIGHT_REDDIT = float(os.getenv("WEIGHT_REDDIT", "0.15"))
+WEIGHT_X = float(os.getenv("WEIGHT_X", "0.15"))
 WEIGHT_MOMENTUM = float(os.getenv("WEIGHT_MOMENTUM", "0.20"))
 WEIGHT_ROE = float(os.getenv("WEIGHT_ROE", "0.20"))
 WEIGHT_AI_RESEARCH = float(os.getenv("WEIGHT_AI_RESEARCH", "0.35"))
 
-REDDIT_SUBREDDITS = ["wallstreetbets", "stocks", "investing"]
-REDDIT_POST_LIMIT = 100          # posts scanned per subreddit
-REDDIT_LOOKBACK_HOURS = 24
+X_LOOKBACK_HOURS = int(os.getenv("X_LOOKBACK_HOURS", "24"))
+X_MAX_RESULTS_PER_QUERY = int(os.getenv("X_MAX_RESULTS_PER_QUERY", "100"))
 
 STATE_FILE = os.path.join(os.path.dirname(__file__), "last_run.json")
 LOG_FILE = os.path.join(os.path.dirname(__file__), "bot.log")

@@ -1,7 +1,7 @@
 """
 Data sources:
   - get_most_active_stocks(): volume-based "activity" from Alpaca's screener
-  - get_reddit_mentions(symbols): peer-interest proxy via Reddit mention counts
+  - get_x_mentions(symbols): peer-interest proxy via X (Twitter) mention counts
   - get_latest_prices(symbols): current trade price, for price filtering
   - get_momentum(symbols): trailing price momentum, for momentum scoring
 """
@@ -119,39 +119,75 @@ def get_momentum(symbols: list[str], lookback_days: int = None) -> dict[str, flo
     return momentum
 
 
-def get_reddit_mentions(symbols: list[str]) -> Counter:
-    """
-    Counts how many times each symbol is mentioned in recent posts (title +
-    selftext) across the configured subreddits, in the last
-    REDDIT_LOOKBACK_HOURS hours. Requires a Reddit "script" app (praw).
-    """
-    import praw  # imported here so the rest of the bot works without praw installed
+def _batch_symbols_for_query(symbols: list[str], max_query_len: int = 400) -> list[list[str]]:
+    """Groups symbols into batches whose OR'd cashtag query stays under X's query length cap."""
+    batches = []
+    current = []
+    current_len = 0
+    for sym in symbols:
+        term_len = len(f'"${sym}" OR ')
+        if current and current_len + term_len > max_query_len:
+            batches.append(current)
+            current = []
+            current_len = 0
+        current.append(sym)
+        current_len += term_len
+    if current:
+        batches.append(current)
+    return batches
 
-    reddit = praw.Reddit(
-        client_id=config.REDDIT_CLIENT_ID,
-        client_secret=config.REDDIT_CLIENT_SECRET,
-        user_agent=config.REDDIT_USER_AGENT,
+
+def get_x_mentions(symbols: list[str], lookback_hours: int = None) -> Counter:
+    """
+    Counts how many times each symbol is mentioned (as a $CASHTAG) in
+    recent English-language posts on X, in the last X_LOOKBACK_HOURS hours.
+    Uses X API v2's recent-search endpoint (7-day max lookback). Requires
+    an X developer app — as of 2026 this endpoint has no free tier, it's
+    pay-per-use, so X_BEARER_TOKEN must be on a billed developer account.
+
+    Searches plain "$TICKER" text (not the dedicated cashtag $ operator,
+    which is gated to higher access tiers) and re-extracts/validates
+    tickers from the matched text with the same regex + blocklist used for
+    Reddit, so a partial/incidental text match doesn't get counted as a
+    real mention.
+    """
+    if not symbols:
+        return Counter()
+
+    lookback_hours = lookback_hours or config.X_LOOKBACK_HOURS
+    start_time = (datetime.now(timezone.utc) - timedelta(hours=lookback_hours)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
     )
 
-    symbol_set = set(symbols)
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=config.REDDIT_LOOKBACK_HOURS)
+    url = f"{config.X_API_BASE_URL}/tweets/search/recent"
+    headers = {"Authorization": f"Bearer {config.X_BEARER_TOKEN}"}
     mentions = Counter()
 
-    for sub_name in config.REDDIT_SUBREDDITS:
+    for batch in _batch_symbols_for_query(symbols):
+        cashtags = " OR ".join(f'"${sym}"' for sym in batch)
+        query = f"({cashtags}) -is:retweet lang:en"
+        params = {
+            "query": query,
+            "max_results": config.X_MAX_RESULTS_PER_QUERY,
+            "start_time": start_time,
+            "tweet.fields": "text",
+        }
+
         try:
-            subreddit = reddit.subreddit(sub_name)
-            for post in subreddit.new(limit=config.REDDIT_POST_LIMIT):
-                post_time = datetime.fromtimestamp(post.created_utc, tz=timezone.utc)
-                if post_time < cutoff:
-                    break  # 'new' is sorted newest-first; stop once too old
-
-                text = f"{post.title} {post.selftext}".upper()
-                found = {t for t in TICKER_RE.findall(text) if t in symbol_set}
-                found -= COMMON_WORD_BLOCKLIST
-                for ticker in found:
-                    mentions[ticker] += 1
+            resp = requests.get(url, headers=headers, params=params, timeout=15)
+            resp.raise_for_status()
+            tweets = resp.json().get("data", [])
         except Exception as exc:
-            logger.warning("Failed scanning r/%s: %s", sub_name, exc)
+            logger.warning("X search failed for batch %s: %s", batch, exc)
+            continue
 
-    logger.info("Reddit mention counts: %s", dict(mentions.most_common(15)))
+        symbol_set = set(batch)
+        for tweet in tweets:
+            text = tweet.get("text", "").upper()
+            found = {t for t in TICKER_RE.findall(text) if t in symbol_set}
+            found -= COMMON_WORD_BLOCKLIST
+            for ticker in found:
+                mentions[ticker] += 1
+
+    logger.info("X mention counts: %s", dict(mentions.most_common(15)))
     return mentions

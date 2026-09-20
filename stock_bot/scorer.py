@@ -3,7 +3,7 @@ Two-stage scoring, targeting cheap, lower-volume, quality-momentum stocks:
 
   Stage 1 (cheap, broad): pull Alpaca's active-stock pool, keep only names
   priced under MAX_STOCK_PRICE, then rank the survivors by a blend of
-  (inverted) trading volume, Reddit mentions, and price momentum; keep the
+  (inverted) trading volume, X mentions, and price momentum; keep the
   top SHORTLIST_SIZE.
 
   Stage 2 (deeper, narrow): for just the shortlist, pull fundamentals
@@ -14,7 +14,7 @@ Two-stage scoring, targeting cheap, lower-volume, quality-momentum stocks:
 
 import logging
 import config
-from data_sources import get_most_active_stocks, get_reddit_mentions, get_latest_prices, get_momentum
+from data_sources import get_most_active_stocks, get_x_mentions, get_latest_prices, get_momentum
 from fundamentals import get_profiles
 from ai_research import research_companies
 
@@ -49,7 +49,7 @@ def _stage1_shortlist(pool_size: int, shortlist_size: int) -> tuple[list[str], d
         config.MAX_STOCK_PRICE, len(candidates), len(volume_ranked),
     )
 
-    mention_counts = get_reddit_mentions(candidates)
+    mention_counts = get_x_mentions(candidates)
     mention_ranked = [sym for sym, _ in mention_counts.most_common()]
 
     momentum = get_momentum(candidates)
@@ -128,7 +128,7 @@ def pick_top_stocks(num_stocks: int = None) -> list[dict]:
         ai = ai_results.get(sym, {"score": 0.5, "summary": ""})
         final_score = (
             config.WEIGHT_VOLUME * s1["volume_score"]
-            + config.WEIGHT_REDDIT * s1["mention_score"]
+            + config.WEIGHT_X * s1["mention_score"]
             + config.WEIGHT_MOMENTUM * s1["momentum_score"]
             + config.WEIGHT_ROE * roe_score
             + config.WEIGHT_AI_RESEARCH * ai["score"]
@@ -156,7 +156,7 @@ def pick_top_stocks(num_stocks: int = None) -> list[dict]:
         roe_str = f"{row['roe']:.1%}" if row["roe"] is not None else "n/a"
         momentum_str = f"{row['momentum_pct']:+.1%}" if row["momentum_pct"] is not None else "n/a"
         logger.info(
-            "  %s  $%.2f  final=%.3f  vol=%.2f  reddit=%.2f(%d)  mom=%.2f(%s)  roe=%s  ai=%.2f — %s",
+            "  %s  $%.2f  final=%.3f  vol=%.2f  x=%.2f(%d)  mom=%.2f(%s)  roe=%s  ai=%.2f — %s",
             row["symbol"], row["price"], row["final_score"], row["volume_score"],
             row["mention_score"], row["mention_count"], row["momentum_score"], momentum_str,
             roe_str, row["ai_score"], row["ai_summary"][:100],
