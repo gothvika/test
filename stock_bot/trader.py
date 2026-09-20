@@ -16,7 +16,10 @@ against a live call. Verify your first real order carefully.)
 """
 
 import base64
+import json
 import logging
+import os
+import time
 
 import requests
 
@@ -26,6 +29,8 @@ from data_sources import get_latest_prices
 logger = logging.getLogger("stock_bot.trader")
 
 _instrument_cache = None
+_INSTRUMENTS_CACHE_FILE = os.path.join(os.path.dirname(__file__), "instruments_cache.json")
+_INSTRUMENTS_CACHE_MAX_AGE = 24 * 60 * 60  # 1 day — instrument lists change rarely
 
 
 def _auth_header() -> dict:
@@ -33,22 +38,43 @@ def _auth_header() -> dict:
     return {"Authorization": f"Basic {base64.b64encode(credentials).decode()}"}
 
 
+def _fetch_raw_instruments() -> list[dict]:
+    """Fetches the full raw instrument list from Trading212 (~17k entries)."""
+    url = f"{config.TRADING212_BASE_URL}/api/v0/equity/metadata/instruments"
+    resp = requests.get(url, headers=_auth_header(), timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _get_raw_instruments() -> list[dict]:
+    """
+    Returns the raw instrument list, cached on disk for a day. The list is
+    large (~17k entries) and changes rarely, so re-fetching it on every
+    order (or every test run) wastes Trading212's rate limit for no
+    benefit.
+    """
+    if os.path.exists(_INSTRUMENTS_CACHE_FILE):
+        age = time.time() - os.path.getmtime(_INSTRUMENTS_CACHE_FILE)
+        if age < _INSTRUMENTS_CACHE_MAX_AGE:
+            with open(_INSTRUMENTS_CACHE_FILE) as f:
+                return json.load(f)
+
+    instruments = _fetch_raw_instruments()
+    with open(_INSTRUMENTS_CACHE_FILE, "w") as f:
+        json.dump(instruments, f)
+    return instruments
+
+
 def _get_ticker_map() -> dict[str, str]:
     """
-    Fetches and caches Trading212's full instrument list, returning
-    {bare_symbol: trading212_ticker}, e.g. {"AAPL": "AAPL_US_EQ"}. Cached
-    in-process for the life of the run — the full list is large and
-    doesn't change intraday, so refetching per order would be wasteful
-    and eat into Trading212's rate limit.
+    Returns {bare_symbol: trading212_ticker}, e.g. {"AAPL": "AAPL_US_EQ"}.
+    Cached in-process for the life of the run on top of the on-disk cache.
     """
     global _instrument_cache
     if _instrument_cache is not None:
         return _instrument_cache
 
-    url = f"{config.TRADING212_BASE_URL}/api/v0/equity/metadata/instruments"
-    resp = requests.get(url, headers=_auth_header(), timeout=15)
-    resp.raise_for_status()
-    instruments = resp.json()
+    instruments = _get_raw_instruments()
 
     ticker_map = {}
     for row in instruments:

@@ -1,5 +1,6 @@
 .env
 last_run.json
-stock_bot.log
+bot.log
+instruments_cache.json
 __pycache__/
 *.pyc
