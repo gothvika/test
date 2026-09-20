@@ -108,7 +108,8 @@ _MAX_ORDER_ATTEMPTS = 4
 def _post_market_order(ticker: str, quantity: float) -> requests.Response:
     url = f"{config.TRADING212_BASE_URL}/api/v0/equity/orders/market"
     headers = {**_auth_header(), "Content-Type": "application/json"}
-    return requests.post(url, headers=headers, json={"ticker": ticker, "quantity": quantity}, timeout=15)
+    payload = {"ticker": ticker, "quantity": quantity, "extendedHours": True}
+    return requests.post(url, headers=headers, json=payload, timeout=15)
 
 
 def _round_up(value: float, decimals: int) -> float:
