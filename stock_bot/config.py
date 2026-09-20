@@ -1,73 +1,75 @@
 """
-Central configuration, loaded from environment variables (see .env.example).
-Uses python-dotenv so a local .env file works for manual runs; in
-production/cron, set real environment variables instead.
+Configuration — reads all secrets from environment variables.
+Never hardcode API keys in source files.
+
+Required environment variables:
+  ALPACA_API_KEY        - your Alpaca API key
+  ALPACA_SECRET_KEY     - your Alpaca API secret
+  ALPACA_PAPER          - "true" (default) or "false". KEEP THIS "true" until
+                           you've watched the bot run correctly for a while.
+  REDDIT_CLIENT_ID       - Reddit app client id (from reddit.com/prefs/apps)
+  REDDIT_CLIENT_SECRET   - Reddit app secret
+  REDDIT_USER_AGENT      - e.g. "stock-activity-bot/1.0 by u/yourname"
+  ANTHROPIC_API_KEY      - Claude API key (console.anthropic.com) — used to
+                            research each shortlisted company's CEO, recent
+                            news, and future prospects via web search
+  FMP_API_KEY             - Financial Modeling Prep API key (free tier at
+                            financialmodelingprep.com) — used for company
+                            fundamentals: market cap, P/E, sector, CEO name
+
+Optional:
+  DOLLARS_PER_STOCK      - default 1.00
+  NUM_STOCKS             - default 10
+  CANDIDATE_POOL_SIZE    - how many "most active" symbols to pull before
+                            scoring, default 50
+  SHORTLIST_SIZE          - how many candidates advance to deep AI research
+                            (fundamentals + CEO + prospects), default 20.
+                            Keep this modest — each one costs an API call.
+  WEIGHT_VOLUME           - default 0.25
+  WEIGHT_REDDIT           - default 0.20
+  WEIGHT_AI_RESEARCH       - default 0.55 (covers value/fundamentals, CEO,
+                            and future-prospects combined)
 """
 
 import os
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
-
-def _bool(name: str, default: bool) -> bool:
-    val = os.environ.get(name)
+def _bool_env(name: str, default: bool) -> bool:
+    val = os.getenv(name)
     if val is None:
         return default
-    return val.strip().lower() in ("1", "true", "yes", "on")
+    return val.strip().lower() in ("1", "true", "yes", "y")
 
+ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "")
+ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "")
+ALPACA_PAPER = _bool_env("ALPACA_PAPER", True)
 
-def _int(name: str, default: int) -> int:
-    val = os.environ.get(name)
-    return int(val) if val else default
-
-
-def _float(name: str, default: float) -> float:
-    val = os.environ.get(name)
-    return float(val) if val else default
-
-
-# --- Alpaca ---
-ALPACA_API_KEY = os.environ.get("ALPACA_API_KEY", "")
-ALPACA_SECRET_KEY = os.environ.get("ALPACA_SECRET_KEY", "")
-ALPACA_PAPER = _bool("ALPACA_PAPER", True)
 ALPACA_TRADING_BASE_URL = (
     "https://paper-api.alpaca.markets" if ALPACA_PAPER else "https://api.alpaca.markets"
 )
 ALPACA_DATA_BASE_URL = "https://data.alpaca.markets"
 
-# --- Anthropic (Claude) ---
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
+REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID", "")
+REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
+REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "stock-activity-bot/1.0")
 
-# --- Financial Modeling Prep (fundamentals data) ---
-FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
 
-# --- Reddit (optional; only needed if data_sources.get_reddit_mentions is used) ---
-REDDIT_CLIENT_ID = os.environ.get("REDDIT_CLIENT_ID", "")
-REDDIT_CLIENT_SECRET = os.environ.get("REDDIT_CLIENT_SECRET", "")
-REDDIT_USER_AGENT = os.environ.get("REDDIT_USER_AGENT", "stock_bot/1.0")
-REDDIT_SUBREDDITS = [
-    s.strip() for s in os.environ.get(
-        "REDDIT_SUBREDDITS", "wallstreetbets,stocks,investing"
-    ).split(",") if s.strip()
-]
-REDDIT_LOOKBACK_HOURS = _int("REDDIT_LOOKBACK_HOURS", 24)
-REDDIT_POST_LIMIT = _int("REDDIT_POST_LIMIT", 200)
+FMP_API_KEY = os.getenv("FMP_API_KEY", "")
+FMP_BASE_URL = "https://financialmodelingprep.com/api/v3"
 
-# --- Candidate pool / scoring ---
-CANDIDATE_POOL_SIZE = _int("CANDIDATE_POOL_SIZE", 50)
-SHORTLIST_SIZE = _int("SHORTLIST_SIZE", 15)
-NUM_STOCKS = _int("NUM_STOCKS", 10)
+DOLLARS_PER_STOCK = float(os.getenv("DOLLARS_PER_STOCK", "1.00"))
+NUM_STOCKS = int(os.getenv("NUM_STOCKS", "10"))
+CANDIDATE_POOL_SIZE = int(os.getenv("CANDIDATE_POOL_SIZE", "50"))
+SHORTLIST_SIZE = int(os.getenv("SHORTLIST_SIZE", "20"))
 
-WEIGHT_VOLUME = _float("WEIGHT_VOLUME", 0.3)
-WEIGHT_REDDIT = _float("WEIGHT_REDDIT", 0.2)
-WEIGHT_AI_RESEARCH = _float("WEIGHT_AI_RESEARCH", 0.5)
+WEIGHT_VOLUME = float(os.getenv("WEIGHT_VOLUME", "0.25"))
+WEIGHT_REDDIT = float(os.getenv("WEIGHT_REDDIT", "0.20"))
+WEIGHT_AI_RESEARCH = float(os.getenv("WEIGHT_AI_RESEARCH", "0.55"))
 
-# --- Trading ---
-DOLLARS_PER_STOCK = _float("DOLLARS_PER_STOCK", 1.0)
+REDDIT_SUBREDDITS = ["wallstreetbets", "stocks", "investing"]
+REDDIT_POST_LIMIT = 100          # posts scanned per subreddit
+REDDIT_LOOKBACK_HOURS = 24
 
-# --- State / logging ---
-STATE_FILE = os.environ.get("STATE_FILE", "last_run.json")
-LOG_FILE = os.environ.get("LOG_FILE", "stock_bot.log")
+STATE_FILE = os.path.join(os.path.dirname(__file__), "last_run.json")
+LOG_FILE = os.path.join(os.path.dirname(__file__), "bot.log")
