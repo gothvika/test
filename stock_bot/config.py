@@ -69,7 +69,7 @@ import os
 
 from dotenv import load_dotenv
 
-load_dotenv()  # loads .env into the environment if present; safe no-op otherwise
+load_dotenv(override=True)  # .env always wins over a stale shell-exported var
 
 
 def _bool_env(name: str, default: bool) -> bool:
