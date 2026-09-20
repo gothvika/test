@@ -25,10 +25,23 @@ Optional:
   SHORTLIST_SIZE          - how many candidates advance to deep AI research
                             (fundamentals + CEO + prospects), default 20.
                             Keep this modest — each one costs an API call.
-  WEIGHT_VOLUME           - default 0.25
-  WEIGHT_REDDIT           - default 0.20
-  WEIGHT_AI_RESEARCH       - default 0.55 (covers value/fundamentals, CEO,
-                            and future-prospects combined)
+  MAX_STOCK_PRICE         - only consider stocks trading below this price,
+                            default 30.00
+  MOMENTUM_LOOKBACK_DAYS  - trading-day window used to compute price
+                            momentum (% change), default 20 (~1 month)
+  WEIGHT_VOLUME           - default 0.10. NOTE: lower volume scores
+                            *better* — this prefers the least-active names
+                            within the day's active pool over the most-active
+                            (Alpaca's screener only exposes rank order, not
+                            raw share counts, so this is relative, not an
+                            absolute volume ceiling)
+  WEIGHT_REDDIT           - default 0.15
+  WEIGHT_MOMENTUM         - default 0.20 — higher trailing price momentum
+                            scores better
+  WEIGHT_ROE              - default 0.20 — higher return on equity (TTM,
+                            from FMP) scores better
+  WEIGHT_AI_RESEARCH       - default 0.35 (covers CEO reputation and
+                            near-term prospects/valuation sanity check)
 """
 
 import os
@@ -63,9 +76,14 @@ NUM_STOCKS = int(os.getenv("NUM_STOCKS", "10"))
 CANDIDATE_POOL_SIZE = int(os.getenv("CANDIDATE_POOL_SIZE", "50"))
 SHORTLIST_SIZE = int(os.getenv("SHORTLIST_SIZE", "20"))
 
-WEIGHT_VOLUME = float(os.getenv("WEIGHT_VOLUME", "0.25"))
-WEIGHT_REDDIT = float(os.getenv("WEIGHT_REDDIT", "0.20"))
-WEIGHT_AI_RESEARCH = float(os.getenv("WEIGHT_AI_RESEARCH", "0.55"))
+MAX_STOCK_PRICE = float(os.getenv("MAX_STOCK_PRICE", "30.00"))
+MOMENTUM_LOOKBACK_DAYS = int(os.getenv("MOMENTUM_LOOKBACK_DAYS", "20"))
+
+WEIGHT_VOLUME = float(os.getenv("WEIGHT_VOLUME", "0.10"))
+WEIGHT_REDDIT = float(os.getenv("WEIGHT_REDDIT", "0.15"))
+WEIGHT_MOMENTUM = float(os.getenv("WEIGHT_MOMENTUM", "0.20"))
+WEIGHT_ROE = float(os.getenv("WEIGHT_ROE", "0.20"))
+WEIGHT_AI_RESEARCH = float(os.getenv("WEIGHT_AI_RESEARCH", "0.35"))
 
 REDDIT_SUBREDDITS = ["wallstreetbets", "stocks", "investing"]
 REDDIT_POST_LIMIT = 100          # posts scanned per subreddit

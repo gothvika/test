@@ -2,12 +2,14 @@
 Data sources:
   - get_most_active_stocks(): volume-based "activity" from Alpaca's screener
   - get_reddit_mentions(symbols): peer-interest proxy via Reddit mention counts
+  - get_latest_prices(symbols): current trade price, for price filtering
+  - get_momentum(symbols): trailing price momentum, for momentum scoring
 """
 
 import re
 import logging
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import requests
 
@@ -46,6 +48,75 @@ def get_most_active_stocks(limit: int = None) -> list[str]:
     symbols = [row["symbol"] for row in data.get("most_actives", [])]
     logger.info("Fetched %d most-active symbols from Alpaca", len(symbols))
     return symbols
+
+
+def get_latest_prices(symbols: list[str]) -> dict[str, float]:
+    """
+    Returns {symbol: latest_trade_price} via Alpaca's latest-trades endpoint.
+    Symbols Alpaca has no recent trade for are simply omitted.
+    """
+    if not symbols:
+        return {}
+
+    url = f"{config.ALPACA_DATA_BASE_URL}/v2/stocks/trades/latest"
+    headers = {
+        "APCA-API-KEY-ID": config.ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": config.ALPACA_SECRET_KEY,
+    }
+    params = {"symbols": ",".join(symbols)}
+
+    resp = requests.get(url, headers=headers, params=params, timeout=15)
+    resp.raise_for_status()
+    trades = resp.json().get("trades", {})
+
+    prices = {sym: row["p"] for sym, row in trades.items() if "p" in row}
+    logger.info("Fetched latest prices for %d/%d symbols", len(prices), len(symbols))
+    return prices
+
+
+def get_momentum(symbols: list[str], lookback_days: int = None) -> dict[str, float]:
+    """
+    Returns {symbol: pct_change} — simple return from the earliest to the
+    latest daily close over roughly the last `lookback_days` trading days,
+    via Alpaca's daily bars endpoint. Positive = upward momentum. Symbols
+    with fewer than 2 bars in range (e.g. newly listed) are omitted.
+    """
+    if not symbols:
+        return {}
+
+    lookback_days = lookback_days or config.MOMENTUM_LOOKBACK_DAYS
+    end = date.today()
+    start = end - timedelta(days=int(lookback_days * 1.6) + 5)  # pad for weekends/holidays
+
+    url = f"{config.ALPACA_DATA_BASE_URL}/v2/stocks/bars"
+    headers = {
+        "APCA-API-KEY-ID": config.ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": config.ALPACA_SECRET_KEY,
+    }
+    params = {
+        "symbols": ",".join(symbols),
+        "timeframe": "1Day",
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "limit": lookback_days + 10,
+        "adjustment": "split",
+    }
+
+    resp = requests.get(url, headers=headers, params=params, timeout=15)
+    resp.raise_for_status()
+    bars_by_symbol = resp.json().get("bars", {})
+
+    momentum = {}
+    for sym, bars in bars_by_symbol.items():
+        if len(bars) < 2:
+            continue
+        first_close = bars[0]["c"]
+        last_close = bars[-1]["c"]
+        if first_close:
+            momentum[sym] = (last_close - first_close) / first_close
+
+    logger.info("Computed momentum for %d/%d symbols", len(momentum), len(symbols))
+    return momentum
 
 
 def get_reddit_mentions(symbols: list[str]) -> Counter:

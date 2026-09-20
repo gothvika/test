@@ -28,12 +28,17 @@ def _get_client() -> anthropic.Anthropic:
 
 
 PROMPT_TEMPLATE = """You are helping evaluate a stock for a small, automated \
-daily $1 purchase (part of a diversified basket of 10 stocks, not a large bet).
+daily $1 purchase (part of a diversified basket of 10 stocks, not a large bet). \
+This bot specifically targets lower-priced, lower-volume stocks with strong \
+return on equity and positive price momentum.
 
 Company: {name} ({symbol})
 Sector / industry: {sector} / {industry}
 Market cap: {market_cap}
+Current price: {price}
 P/E ratio: {pe_ratio}
+Return on equity (TTM): {roe}
+Trailing price momentum ({momentum_days}-day): {momentum_pct}
 Business description: {description}
 
 Please research using web search:
@@ -61,13 +66,19 @@ def research_company(profile: dict) -> dict:
     the whole daily run over one bad lookup.
     """
     symbol = profile["symbol"]
+    roe = profile.get("roe")
+    momentum_pct = profile.get("momentum_pct")
     prompt = PROMPT_TEMPLATE.format(
         name=profile.get("name") or symbol,
         symbol=symbol,
         sector=profile.get("sector") or "unknown",
         industry=profile.get("industry") or "unknown",
         market_cap=profile.get("market_cap") or "unknown",
+        price=profile.get("price") or "unknown",
         pe_ratio=profile.get("pe_ratio") or "unknown",
+        roe=f"{roe:.1%}" if roe is not None else "unknown",
+        momentum_days=config.MOMENTUM_LOOKBACK_DAYS,
+        momentum_pct=f"{momentum_pct:+.1%}" if momentum_pct is not None else "unknown",
         description=(profile.get("description") or "")[:600],
     )
 
