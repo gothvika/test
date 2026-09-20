@@ -77,7 +77,9 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
 
 FMP_API_KEY = os.getenv("FMP_API_KEY", "")
-FMP_BASE_URL = "https://financialmodelingprep.com/api/v3"
+# FMP's old /api/v3/ endpoints are legacy-only (need a subscription predating
+# Aug 2025) and 403 otherwise; /stable/ is the current, freely-accessible base.
+FMP_BASE_URL = "https://financialmodelingprep.com/stable"
 
 DOLLARS_PER_STOCK = float(os.getenv("DOLLARS_PER_STOCK", "1.00"))
 NUM_STOCKS = int(os.getenv("NUM_STOCKS", "10"))

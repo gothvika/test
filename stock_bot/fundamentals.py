@@ -14,26 +14,37 @@ import config
 logger = logging.getLogger("stock_bot.fundamentals")
 
 
+def _first_row(data) -> dict | None:
+    """FMP's /stable/ endpoints return a bare object for some calls and a
+    single-item list for others depending on the endpoint; handle both."""
+    if isinstance(data, list):
+        return data[0] if data else None
+    if isinstance(data, dict):
+        return data or None
+    return None
+
+
 def get_roe(symbol: str) -> float | None:
     """
     Returns trailing-twelve-month return on equity (as a decimal, e.g. 0.25
     for 25%) from FMP's ratios-ttm endpoint, or None if unavailable.
     """
-    url = f"{config.FMP_BASE_URL}/ratios-ttm/{symbol}"
-    params = {"apikey": config.FMP_API_KEY}
+    url = f"{config.FMP_BASE_URL}/ratios-ttm"
+    params = {"symbol": symbol, "apikey": config.FMP_API_KEY}
 
     try:
         resp = requests.get(url, params=params, timeout=15)
         resp.raise_for_status()
-        data = resp.json()
+        row = _first_row(resp.json())
     except Exception as exc:
         logger.warning("ROE lookup failed for %s: %s", symbol, exc)
         return None
 
-    if not data:
+    if not row:
         return None
 
-    return data[0].get("returnOnEquityTTM")
+    # Field naming has varied between FMP API versions; check both.
+    return row.get("returnOnEquityTTM", row.get("returnOnEquity"))
 
 
 def get_company_profile(symbol: str) -> dict | None:
@@ -41,22 +52,21 @@ def get_company_profile(symbol: str) -> dict | None:
     Returns a dict with keys: name, ceo, sector, industry, market_cap,
     price, pe_ratio, roe, description, website — or None if the lookup fails.
     """
-    url = f"{config.FMP_BASE_URL}/profile/{symbol}"
-    params = {"apikey": config.FMP_API_KEY}
+    url = f"{config.FMP_BASE_URL}/profile"
+    params = {"symbol": symbol, "apikey": config.FMP_API_KEY}
 
     try:
         resp = requests.get(url, params=params, timeout=15)
         resp.raise_for_status()
-        data = resp.json()
+        row = _first_row(resp.json())
     except Exception as exc:
         logger.warning("Fundamentals lookup failed for %s: %s", symbol, exc)
         return None
 
-    if not data:
+    if not row:
         logger.warning("No fundamentals data returned for %s", symbol)
         return None
 
-    row = data[0]
     return {
         "symbol": symbol,
         "name": row.get("companyName"),
