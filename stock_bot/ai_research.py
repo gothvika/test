@@ -8,9 +8,7 @@ This is a heuristic research assistant, not investment advice. Its scores
 are opinions synthesized from public web content, not guarantees.
 """
 
-import json
 import logging
-import re
 
 import anthropic
 import config
@@ -26,6 +24,33 @@ def _get_client() -> anthropic.Anthropic:
         _client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     return _client
 
+
+# Claude sometimes doesn't fully close out a plain-text "respond with only
+# JSON" answer after a web-search turn (observed live: valid schema, no
+# max_tokens cutoff, just an incomplete trailing string). Using tool-use for
+# the final answer instead has the API enforce the schema, which avoids
+# that failure mode entirely.
+SUBMIT_RESULT_TOOL = {
+    "name": "submit_research_result",
+    "description": "Submit your final suitability assessment for this stock, once you've finished researching.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "score": {
+                "type": "number",
+                "description": (
+                    "0.0 to 1.0, where 1.0 = strong CEO + strong prospects + "
+                    "reasonable valuation, 0.0 = significant red flags on any of those fronts."
+                ),
+            },
+            "summary": {
+                "type": "string",
+                "description": "2-3 sentence plain-English rationale citing what you found.",
+            },
+        },
+        "required": ["score", "summary"],
+    },
+}
 
 PROMPT_TEMPLATE = """You are helping evaluate a stock for a small, automated \
 daily $1 purchase (part of a diversified basket of 10 stocks, not a large bet). \
@@ -49,12 +74,8 @@ guidance, major news in the last 1-3 months, competitive position).
 3. Whether the current valuation looks reasonable, stretched, or cheap \
 relative to the sector, given what you find.
 
-Then respond with ONLY a JSON object (no other text, no markdown fences):
-{{
-  "score": <float 0.0 to 1.0, where 1.0 = strong CEO + strong prospects + \
-reasonable valuation, 0.0 = significant red flags on any of those fronts>,
-  "summary": "<2-3 sentence plain-English rationale citing what you found>"
-}}
+When you're done researching, call submit_research_result with your final \
+score and summary — don't just write the answer out as text.
 """
 
 
@@ -86,21 +107,29 @@ def research_company(profile: dict) -> dict:
         client = _get_client()
         response = client.messages.create(
             model=config.ANTHROPIC_MODEL,
-            max_tokens=1024,
-            tools=[{"type": "web_search_20250305", "name": "web_search"}],
+            max_tokens=2048,
+            tools=[
+                {"type": "web_search_20250305", "name": "web_search"},
+                SUBMIT_RESULT_TOOL,
+            ],
             messages=[{"role": "user", "content": prompt}],
         )
 
-        text_parts = [b.text for b in response.content if getattr(b, "type", None) == "text"]
-        full_text = "\n".join(text_parts).strip()
+        result_block = next(
+            (
+                b for b in response.content
+                if getattr(b, "type", None) == "tool_use" and b.name == "submit_research_result"
+            ),
+            None,
+        )
+        if result_block is None:
+            raise ValueError(
+                f"Model never called submit_research_result (stop_reason={response.stop_reason})"
+            )
 
-        # Model may wrap JSON in fences despite instructions; strip if present.
-        cleaned = re.sub(r"^```json|```$", "", full_text.strip(), flags=re.MULTILINE).strip()
-        parsed = json.loads(cleaned)
-
-        score = float(parsed.get("score", 0.5))
+        score = float(result_block.input.get("score", 0.5))
         score = max(0.0, min(1.0, score))  # clamp
-        summary = str(parsed.get("summary", "")).strip()
+        summary = str(result_block.input.get("summary", "")).strip()
 
         logger.info("AI research for %s: score=%.2f — %s", symbol, score, summary)
         return {"symbol": symbol, "score": score, "summary": summary}
