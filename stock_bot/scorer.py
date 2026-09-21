@@ -107,6 +107,19 @@ def pick_top_stocks(num_stocks: int = None) -> list[dict]:
     if dropped:
         logger.warning("Dropping from shortlist (no fundamentals data): %s", dropped)
 
+    # Hard-exclude ETFs/funds and inactive listings before spending an AI
+    # research call on them — these are never a real operating company
+    # (e.g. "NVD"/"CONL" turned out to be leveraged/inverse single-stock
+    # ETFs riding a real ticker's name), so there's nothing to research.
+    etf_excluded = {
+        s for s in usable_symbols
+        if profiles[s].get("is_etf") or profiles[s].get("is_fund")
+        or not profiles[s].get("is_actively_trading", True)
+    }
+    if etf_excluded:
+        logger.info("Excluding ETFs/funds/inactive listings: %s", etf_excluded)
+    usable_symbols = [s for s in usable_symbols if s not in etf_excluded]
+
     roe_ranked = sorted(
         usable_symbols,
         key=lambda s: profiles[s].get("roe") if profiles[s].get("roe") is not None else float("-inf"),
@@ -147,6 +160,21 @@ def pick_top_stocks(num_stocks: int = None) -> list[dict]:
             "ai_score": ai["score"],
             "ai_summary": ai["summary"],
         })
+
+    # Hard veto: a stock the AI research flags as clearly disqualifying
+    # (leveraged/inverse ETF, no real business, fraud conviction, etc. —
+    # these show up as scores near 0, not just "low") shouldn't be able to
+    # buy its way into the picks via strong volume/momentum/X signals.
+    # Blending handles ordinary quality tradeoffs fine; it's the wrong tool
+    # for "this isn't a legitimate pick at all."
+    vetoed = [row for row in combined if row["ai_score"] < config.MIN_AI_SCORE_THRESHOLD]
+    if vetoed:
+        logger.info(
+            "Vetoed (ai_score < %.2f): %s",
+            config.MIN_AI_SCORE_THRESHOLD,
+            {row["symbol"]: round(row["ai_score"], 2) for row in vetoed},
+        )
+    combined = [row for row in combined if row["ai_score"] >= config.MIN_AI_SCORE_THRESHOLD]
 
     combined.sort(key=lambda row: row["final_score"], reverse=True)
     top = combined[:num_stocks]

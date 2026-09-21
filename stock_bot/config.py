@@ -61,6 +61,13 @@ Optional:
                             from FMP) scores better
   WEIGHT_AI_RESEARCH       - default 0.35 (covers CEO reputation and
                             near-term prospects/valuation sanity check)
+  MIN_AI_SCORE_THRESHOLD  - default 0.10. A stock whose AI research score
+                            falls below this is excluded from the final
+                            picks entirely, regardless of its other
+                            scores — a hard veto rather than letting a
+                            clear red flag (leveraged/inverse ETF, no
+                            real business, fraud conviction, etc.) just
+                            get diluted into the blend.
 """
 
 import os
@@ -112,6 +119,8 @@ WEIGHT_X = float(os.getenv("WEIGHT_X", "0.15"))
 WEIGHT_MOMENTUM = float(os.getenv("WEIGHT_MOMENTUM", "0.20"))
 WEIGHT_ROE = float(os.getenv("WEIGHT_ROE", "0.20"))
 WEIGHT_AI_RESEARCH = float(os.getenv("WEIGHT_AI_RESEARCH", "0.35"))
+
+MIN_AI_SCORE_THRESHOLD = float(os.getenv("MIN_AI_SCORE_THRESHOLD", "0.10"))
 
 X_LOOKBACK_HOURS = int(os.getenv("X_LOOKBACK_HOURS", "24"))
 X_MAX_RESULTS_PER_QUERY = int(os.getenv("X_MAX_RESULTS_PER_QUERY", "100"))

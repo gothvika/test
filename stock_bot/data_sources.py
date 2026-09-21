@@ -93,19 +93,32 @@ def get_momentum(symbols: list[str], lookback_days: int = None) -> dict[str, flo
         "APCA-API-KEY-ID": config.ALPACA_API_KEY,
         "APCA-API-SECRET-KEY": config.ALPACA_SECRET_KEY,
     }
+    # On the multi-symbol bars endpoint, `limit` caps the TOTAL bars
+    # returned across every symbol in the request, not per-symbol —
+    # confirmed live (a 30-bar limit across 39 symbols returned momentum
+    # for only 2 of them, the rest got starved of their share). Scale it
+    # by symbol count so each one can get its full lookback window.
+    bars_per_symbol = lookback_days + 10
     params = {
         "symbols": ",".join(symbols),
         "timeframe": "1Day",
         "start": start.isoformat(),
         "end": end.isoformat(),
-        "limit": lookback_days + 10,
+        "limit": min(len(symbols) * bars_per_symbol, 10000),  # 10000 = Alpaca's max page size
         "adjustment": "split",
         "feed": config.ALPACA_DATA_FEED,
     }
 
     resp = requests.get(url, headers=headers, params=params, timeout=15)
     resp.raise_for_status()
-    bars_by_symbol = resp.json().get("bars", {})
+    body = resp.json()
+    bars_by_symbol = body.get("bars", {})
+    if body.get("next_page_token"):
+        logger.warning(
+            "Momentum bars response was paginated (next_page_token present) — "
+            "some symbols may be missing data. Consider a smaller candidate pool "
+            "or shorter MOMENTUM_LOOKBACK_DAYS if this happens often."
+        )
 
     momentum = {}
     for sym, bars in bars_by_symbol.items():

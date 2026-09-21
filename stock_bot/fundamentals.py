@@ -69,7 +69,8 @@ def get_roe(symbol: str) -> float | None:
 def get_company_profile(symbol: str) -> dict | None:
     """
     Returns a dict with keys: name, ceo, sector, industry, market_cap,
-    price, pe_ratio, roe, description, website — or None if the lookup fails.
+    price, pe_ratio, roe, is_etf, is_fund, is_actively_trading,
+    description, website — or None if the lookup fails.
     """
     url = f"{config.FMP_BASE_URL}/profile"
     params = {"symbol": symbol, "apikey": config.FMP_API_KEY}
@@ -96,6 +97,13 @@ def get_company_profile(symbol: str) -> dict | None:
         "price": row.get("price"),
         "pe_ratio": row.get("pe"),
         "roe": get_roe(symbol),
+        # Used to hard-exclude leveraged/inverse single-stock ETFs and
+        # similar look-alike products before spending an AI research call
+        # on something that was never a real operating company (e.g.
+        # "NVD"/"CONL" — leveraged ETFs riding a real ticker's name).
+        "is_etf": bool(row.get("isEtf")),
+        "is_fund": bool(row.get("isFund")),
+        "is_actively_trading": row.get("isActivelyTrading", True),
         "description": row.get("description"),
         "website": row.get("website"),
     }
