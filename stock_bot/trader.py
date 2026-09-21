@@ -52,12 +52,23 @@ def check_market_open() -> bool:
     return bool(resp.json().get("is_open"))
 
 
+def _optional_float(row: dict, key: str):
+    val = row.get(key)
+    return float(val) if val is not None else None
+
+
 def get_positions() -> list[dict]:
     """
     Returns currently held Alpaca positions:
-    [{"symbol": ..., "qty": ..., "avg_entry_price": ..., "unrealized_plpc": ...}]
+    [{"symbol": ..., "qty": ..., "avg_entry_price": ..., "unrealized_plpc": ...,
+      "current_price": ..., "market_value": ..., "unrealized_pl": ...,
+      "cost_basis": ...}]
     unrealized_plpc is Alpaca's own fractional unrealized P/L, e.g. -0.15
     means the position is down 15% from its average entry price.
+    The current_price/market_value/unrealized_pl/cost_basis fields are
+    None if Alpaca's response doesn't include them (kept optional rather
+    than required so this stays backward compatible with the fields
+    apply_stop_loss_and_take_profit() actually needs).
     """
     url = f"{config.ALPACA_TRADING_BASE_URL}/v2/positions"
     headers = {
@@ -73,9 +84,34 @@ def get_positions() -> list[dict]:
             "qty": float(row["qty"]),
             "avg_entry_price": float(row["avg_entry_price"]),
             "unrealized_plpc": float(row["unrealized_plpc"]),
+            "current_price": _optional_float(row, "current_price"),
+            "market_value": _optional_float(row, "market_value"),
+            "unrealized_pl": _optional_float(row, "unrealized_pl"),
+            "cost_basis": _optional_float(row, "cost_basis"),
         }
         for row in rows
     ]
+
+
+def get_account() -> dict:
+    """
+    Returns an account-level snapshot from Alpaca:
+    {"cash": ..., "portfolio_value": ..., "equity": ..., "buying_power": ...}
+    """
+    url = f"{config.ALPACA_TRADING_BASE_URL}/v2/account"
+    headers = {
+        "APCA-API-KEY-ID": config.ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": config.ALPACA_SECRET_KEY,
+    }
+    resp = requests.get(url, headers=headers, timeout=15)
+    resp.raise_for_status()
+    row = resp.json()
+    return {
+        "cash": float(row["cash"]),
+        "portfolio_value": float(row["portfolio_value"]),
+        "equity": float(row["equity"]),
+        "buying_power": float(row["buying_power"]),
+    }
 
 
 def close_position(symbol: str) -> dict:

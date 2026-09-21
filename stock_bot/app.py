@@ -35,8 +35,15 @@ from flask import Flask, render_template, request, url_for
 
 import config
 import history
+from fundamentals import get_company_profile
 from scorer import pick_top_stocks
-from trader import buy_dollar_amount, check_market_open, apply_stop_loss_and_take_profit
+from trader import (
+    buy_dollar_amount,
+    check_market_open,
+    apply_stop_loss_and_take_profit,
+    get_account,
+    get_positions,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -106,6 +113,73 @@ def index():
         already_ran=_already_ran_today(),
         mode=_mode(),
         dollars_per_stock=config.DOLLARS_PER_STOCK,
+    )
+
+
+@app.route("/portfolio")
+def portfolio():
+    """
+    Live snapshot of the actual Alpaca account — current positions and
+    their real broker-reported P/L, plus a sector breakdown to flag
+    concentration. Unlike the report page, this reads live account state
+    directly, not anything cached from a prior /report call.
+    """
+    missing = _missing_env_vars()
+    if missing:
+        return render_template("error.html", message=f"Missing required environment variables: {', '.join(missing)}")
+
+    try:
+        positions = get_positions()
+    except Exception as exc:
+        logger.exception("Failed to fetch positions")
+        return render_template("error.html", message=f"Failed to fetch positions: {exc}")
+
+    try:
+        account = get_account()
+    except Exception:
+        logger.exception("Failed to fetch account info")
+        account = None
+
+    total_market_value = 0.0
+    total_unrealized_pl = 0.0
+    total_cost_basis = 0.0
+    sector_value = {}
+    rows = []
+
+    for pos in positions:
+        try:
+            profile = get_company_profile(pos["symbol"])
+        except Exception:
+            profile = None
+        sector = (profile or {}).get("sector") or "Unknown"
+
+        market_value = pos.get("market_value") or 0.0
+        unrealized_pl = pos.get("unrealized_pl") or 0.0
+        cost_basis = pos.get("cost_basis") or 0.0
+        total_market_value += market_value
+        total_unrealized_pl += unrealized_pl
+        total_cost_basis += cost_basis
+        sector_value[sector] = sector_value.get(sector, 0.0) + market_value
+
+        rows.append({**pos, "sector": sector})
+
+    sector_breakdown = sorted(
+        (
+            {"sector": s, "value": v, "pct": (v / total_market_value if total_market_value else 0)}
+            for s, v in sector_value.items()
+        ),
+        key=lambda x: -x["value"],
+    )
+
+    return render_template(
+        "portfolio.html",
+        positions=rows,
+        account=account,
+        total_market_value=total_market_value,
+        total_unrealized_pl=total_unrealized_pl,
+        total_unrealized_pct=(total_unrealized_pl / total_cost_basis if total_cost_basis else None),
+        sector_breakdown=sector_breakdown,
+        mode=_mode(),
     )
 
 

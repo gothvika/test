@@ -13,7 +13,13 @@ import config
 
 
 @pytest.fixture
-def client():
+def client(tmp_path, monkeypatch):
+    # Isolate history.py's writes to a tmp dir — without this, every test
+    # that hits /report or /execute would write real files into the
+    # project's actual stock_bot/history/.
+    import history
+    monkeypatch.setattr(history, "HISTORY_DIR", str(tmp_path))
+
     app_module.app.config["TESTING"] = True
     app_module._last_report.clear()
     with app_module.app.test_client() as c:
@@ -150,3 +156,60 @@ def test_execute_refuses_double_buy_same_day(client):
     assert resp.status_code == 200
     assert b"twice" in resp.data
     mock_buy.assert_not_called()
+
+
+FAKE_POSITIONS = [
+    {
+        "symbol": "GOOD", "qty": 0.1667, "avg_entry_price": 12.0, "unrealized_plpc": 0.083,
+        "current_price": 13.0, "market_value": 2.1667, "unrealized_pl": 0.1667, "cost_basis": 2.0,
+    },
+]
+FAKE_ACCOUNT = {"cash": 950.0, "portfolio_value": 952.17, "equity": 952.17, "buying_power": 1900.0}
+
+
+def test_portfolio_shows_positions_and_sector(client):
+    with patch.object(config, "ALPACA_API_KEY", "key"), \
+         patch.object(config, "ALPACA_SECRET_KEY", "secret"), \
+         patch.object(config, "ANTHROPIC_API_KEY", "key"), \
+         patch.object(config, "FMP_API_KEY", "key"), \
+         patch("app.get_positions", return_value=FAKE_POSITIONS), \
+         patch("app.get_account", return_value=FAKE_ACCOUNT), \
+         patch("app.get_company_profile", return_value={"sector": "Technology"}):
+        resp = client.get("/portfolio")
+
+    assert resp.status_code == 200
+    assert b"GOOD" in resp.data
+    assert b"Technology" in resp.data
+
+
+def test_portfolio_handles_no_positions(client):
+    with patch.object(config, "ALPACA_API_KEY", "key"), \
+         patch.object(config, "ALPACA_SECRET_KEY", "secret"), \
+         patch.object(config, "ANTHROPIC_API_KEY", "key"), \
+         patch.object(config, "FMP_API_KEY", "key"), \
+         patch("app.get_positions", return_value=[]), \
+         patch("app.get_account", return_value=FAKE_ACCOUNT):
+        resp = client.get("/portfolio")
+
+    assert resp.status_code == 200
+    assert b"No open positions" in resp.data
+
+
+def test_portfolio_flags_sector_concentration(client):
+    concentrated = [
+        {"symbol": "A", "qty": 1, "avg_entry_price": 10.0, "unrealized_plpc": 0.0,
+         "current_price": 10.0, "market_value": 10.0, "unrealized_pl": 0.0, "cost_basis": 10.0},
+        {"symbol": "B", "qty": 1, "avg_entry_price": 10.0, "unrealized_plpc": 0.0,
+         "current_price": 10.0, "market_value": 10.0, "unrealized_pl": 0.0, "cost_basis": 10.0},
+    ]
+    with patch.object(config, "ALPACA_API_KEY", "key"), \
+         patch.object(config, "ALPACA_SECRET_KEY", "secret"), \
+         patch.object(config, "ANTHROPIC_API_KEY", "key"), \
+         patch.object(config, "FMP_API_KEY", "key"), \
+         patch("app.get_positions", return_value=concentrated), \
+         patch("app.get_account", return_value=FAKE_ACCOUNT), \
+         patch("app.get_company_profile", return_value={"sector": "Technology"}):
+        resp = client.get("/portfolio")
+
+    assert resp.status_code == 200
+    assert b"over 40%" in resp.data
