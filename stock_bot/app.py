@@ -35,6 +35,7 @@ from flask import Flask, render_template, request, url_for
 
 import config
 import history
+from data_sources import get_latest_prices
 from fundamentals import get_company_profile
 from scorer import pick_top_stocks
 from trader import (
@@ -180,6 +181,62 @@ def portfolio():
         total_unrealized_pct=(total_unrealized_pl / total_cost_basis if total_cost_basis else None),
         sector_breakdown=sector_breakdown,
         mode=_mode(),
+    )
+
+
+@app.route("/history")
+def history_list():
+    """Every day a report was generated, most recent first."""
+    records = list(reversed(history.load_all()))
+    return render_template("history_list.html", records=records)
+
+
+@app.route("/history/<day>")
+def history_detail(day):
+    """
+    One day's full record: picks, any stop-loss/take-profit sells, orders
+    placed (with fill price/slippage if executed), and the full shortlist
+    split into bought vs. skipped — each with a live hypothetical return
+    since that day, the same "did the ranking add value" check
+    review_history.py does, but for a single day in the browser.
+    """
+    record = next((r for r in history.load_all() if r.get("date") == day), None)
+    if not record:
+        return render_template("error.html", message=f"No history record found for {day}.")
+
+    picks = record.get("picks") or []
+    full_shortlist = record.get("full_shortlist") or []
+    top_symbols = {p["symbol"] for p in picks}
+
+    symbols = sorted({e["symbol"] for e in full_shortlist if e.get("price")})
+    current_prices = {}
+    if symbols:
+        try:
+            current_prices = get_latest_prices(symbols)
+        except Exception:
+            logger.exception("Failed to fetch current prices for history detail %s", day)
+
+    shortlist_rows = []
+    for e in full_shortlist:
+        current = current_prices.get(e["symbol"])
+        hypothetical_return = (
+            (current - e["price"]) / e["price"] if current is not None and e.get("price") else None
+        )
+        shortlist_rows.append({
+            **e,
+            "in_top_n": e["symbol"] in top_symbols,
+            "current_price": current,
+            "hypothetical_return": hypothetical_return,
+        })
+    shortlist_rows.sort(key=lambda r: (not r["in_top_n"], -(r.get("final_score") or 0)))
+
+    return render_template(
+        "history_detail.html",
+        record=record,
+        picks=picks,
+        sell_results=record.get("sell_results") or {},
+        execution=record.get("execution") or {},
+        shortlist_rows=shortlist_rows,
     )
 
 

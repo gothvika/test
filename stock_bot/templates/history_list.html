@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Report History — Stock Bot{% endblock %}
+{% block content %}
+<h1>Report History</h1>
+<div class="subtitle">{{ records|length }} day{{ "s" if records|length != 1 else "" }} recorded</div>
+
+{% if not records %}
+<div class="card">
+  <p>No reports generated yet — click "Generate report" from the landing page to start building history.</p>
+</div>
+{% else %}
+<div class="card">
+  <table>
+    <tr><th>Date</th><th>Mode</th><th>Picks</th><th>Executed</th><th>Sells</th><th></th></tr>
+    {% for r in records %}
+    <tr>
+      <td class="symbol">{{ r.date }}</td>
+      <td><span class="badge {{ 'badge-live' if r.mode == 'LIVE' else 'badge-paper' }}">{{ r.mode }}</span></td>
+      <td>{{ (r.picks or [])|length }}</td>
+      <td class="{{ 'pos' if r.executed else '' }}">{{ "Yes" if r.executed else "No" }}</td>
+      <td>{{ (r.sell_results or {})|length }}</td>
+      <td><a href="{{ url_for('history_detail', day=r.date) }}" class="back-link">View &rarr;</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
+<a href="{{ url_for('index') }}" class="back-link">&larr; Back</a>
+{% endblock %}

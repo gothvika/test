@@ -10,6 +10,7 @@ import pytest
 
 import app as app_module
 import config
+import history
 
 
 @pytest.fixture
@@ -17,7 +18,6 @@ def client(tmp_path, monkeypatch):
     # Isolate history.py's writes to a tmp dir — without this, every test
     # that hits /report or /execute would write real files into the
     # project's actual stock_bot/history/.
-    import history
     monkeypatch.setattr(history, "HISTORY_DIR", str(tmp_path))
 
     app_module.app.config["TESTING"] = True
@@ -213,3 +213,40 @@ def test_portfolio_flags_sector_concentration(client):
 
     assert resp.status_code == 200
     assert b"over 40%" in resp.data
+
+
+def test_history_list_empty(client):
+    resp = client.get("/history")
+    assert resp.status_code == 200
+    assert b"No reports generated yet" in resp.data
+
+
+def test_history_list_shows_recorded_days(client):
+    history.record_report(FAKE_PICKS, {}, True, "PAPER", full_shortlist=FAKE_PICKS, day="2026-01-05")
+
+    resp = client.get("/history")
+
+    assert resp.status_code == 200
+    assert b"2026-01-05" in resp.data
+
+
+def test_history_detail_shows_shortlist_and_execution(client):
+    history.record_report(FAKE_PICKS, {}, True, "PAPER", full_shortlist=FAKE_PICKS, day="2026-01-05")
+    history.record_execution(
+        {"GOOD": {"status": "submitted", "order_id": "o1", "scored_price": 12.0, "filled_avg_price": "12.10"}},
+        day="2026-01-05",
+    )
+
+    with patch("app.get_latest_prices", return_value={"GOOD": 13.0}):
+        resp = client.get("/history/2026-01-05")
+
+    assert resp.status_code == 200
+    assert b"GOOD" in resp.data
+    assert b"Bought" in resp.data
+    assert b"o1" in resp.data
+
+
+def test_history_detail_missing_day_shows_error(client):
+    resp = client.get("/history/2099-01-01")
+    assert resp.status_code == 200
+    assert b"No history record found" in resp.data
