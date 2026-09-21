@@ -1,0 +1,285 @@
+"""
+Two-stage scoring, targeting cheap, lower-volume, quality-momentum stocks:
+
+  Stage 1 (cheap, broad): pull Alpaca's active-stock pool AND today's top
+  gainers (movers), keep only names priced in [MIN_STOCK_PRICE,
+  MAX_STOCK_PRICE) — the floor exists because the movers screener's "top
+  gainers" turned out to be mostly sub-$1 penny stocks/warrants with
+  illiquid-noise percentage swings, not real momentum — then rank the
+  survivors by a blend of (inverted) trading volume, X mentions, and
+  price momentum; keep the top SHORTLIST_SIZE.
+
+  Stage 2 (deeper, narrow): for just the shortlist, pull fundamentals
+  (value/CEO/sector/ROE) and recent news, hard-exclude ETFs/negative-ROE/
+  crypto-linked names, then run AI web-search research (CEO reputation,
+  future prospects, valuation sanity check) grounded in that real news.
+  Combine all signals into a final score and return the top NUM_STOCKS.
+"""
+
+import logging
+import re
+
+import config
+from data_sources import get_most_active_stocks, get_top_movers, get_x_mentions, get_latest_prices, get_momentum
+from fundamentals import get_profiles
+from news_sources import get_recent_news
+from ai_research import research_companies
+
+logger = logging.getLogger("stock_bot.scorer")
+
+# Companies whose business is holding/mining/trading crypto assets rather
+# than a real operating business with its own products/revenue (crypto
+# exchanges, "digital asset treasury" vehicles, miners) — matched against
+# sector/industry/name/description text from the fundamentals profile.
+#
+# `crypto(?!graph)` deliberately excludes "cryptography"/"cryptographic" —
+# a naive substring match on "crypto" would have false-positived on any
+# company describing itself as doing encryption/security work, since
+# "cryptography" contains "crypto" as a literal substring.
+_CRYPTO_KEYWORD_PATTERN = re.compile(
+    r"\b(bitcoin|crypto(?!graph)\w*|blockchain|ethereum|digital[- ]asset\w*"
+    r"|web3|stablecoin\w*|digital[- ]currenc\w*)\b",
+    re.IGNORECASE,
+)
+
+# Tickers whose FMP profile text doesn't reliably self-describe as
+# crypto-related (legacy company names, holding-company structures) but
+# whose actual business is crypto mining/treasury/exchange — a keyword
+# scan alone misses these. Hand-maintained, not exhaustive.
+KNOWN_CRYPTO_SYMBOLS = {
+    "MSTR", "COIN", "MARA", "RIOT", "CLSK", "BITF", "HUT", "CIFR", "WULF",
+    "BTBT", "SDIG", "IREN", "CORZ", "BMNR", "SBET",
+}
+
+
+def _is_crypto_linked(profile: dict) -> bool:
+    if profile.get("symbol") in KNOWN_CRYPTO_SYMBOLS:
+        return True
+    text = " ".join(
+        str(profile.get(field) or "") for field in ("sector", "industry", "name", "description")
+    )
+    return bool(_CRYPTO_KEYWORD_PATTERN.search(text))
+
+
+def _rank_score(ordered_items: list, item: str) -> float:
+    """1.0 for best rank, decaying toward 0 for worse ranks; 0 if absent."""
+    if item not in ordered_items:
+        return 0.0
+    idx = ordered_items.index(item)
+    n = len(ordered_items)
+    return (n - idx) / n
+
+
+def _stage1_shortlist(pool_size: int, shortlist_size: int) -> tuple[list[str], dict]:
+    volume_ranked = get_most_active_stocks(limit=pool_size)
+    if not volume_ranked:
+        raise RuntimeError("No candidate symbols returned from Alpaca screener.")
+
+    # The most-actives screener can only ever surface names that are
+    # ALREADY heavily traded. Merge in today's top gainers too, so a stock
+    # having a strong move without (yet) being top-volume gets a shot at
+    # entering the pool as well.
+    movers = get_top_movers(limit=config.MOVERS_POOL_SIZE)
+    new_from_movers = [s for s in movers if s not in volume_ranked]
+    if new_from_movers:
+        logger.info(
+            "Adding %d symbols from movers screener not already in most-actives: %s",
+            len(new_from_movers), new_from_movers,
+        )
+    all_symbols = volume_ranked + new_from_movers
+
+    prices = get_latest_prices(all_symbols)
+    candidates = [
+        sym for sym in all_symbols
+        if prices.get(sym) is not None
+        and config.MIN_STOCK_PRICE <= prices[sym] < config.MAX_STOCK_PRICE
+    ]
+    if not candidates:
+        raise RuntimeError(
+            f"No candidates in [${config.MIN_STOCK_PRICE:.2f}, ${config.MAX_STOCK_PRICE:.2f}) "
+            f"found in today's active pool."
+        )
+    logger.info(
+        "Price filter ($%.2f-$%.2f) kept %d/%d candidates",
+        config.MIN_STOCK_PRICE, config.MAX_STOCK_PRICE, len(candidates), len(all_symbols),
+    )
+
+    mention_counts = get_x_mentions(candidates)
+    mention_ranked = [sym for sym, _ in mention_counts.most_common()]
+
+    momentum = get_momentum(candidates)
+    momentum_ranked = sorted(candidates, key=lambda s: momentum.get(s, float("-inf")), reverse=True)
+
+    # Smaller trading volume is preferred: Alpaca's screener orders
+    # highest-volume-first, so reverse it to score the least-active of the
+    # eligible candidates best. (Relative to the active pool, not an
+    # absolute share-count threshold — Alpaca doesn't expose raw counts here.)
+    volume_ranked_candidates = [sym for sym in volume_ranked if sym in candidates]
+    smaller_volume_ranked = list(reversed(volume_ranked_candidates))
+
+    stage1_scores = {}
+    for sym in candidates:
+        stage1_scores[sym] = {
+            "price": prices[sym],
+            "volume_score": _rank_score(smaller_volume_ranked, sym),
+            "mention_score": _rank_score(mention_ranked, sym),
+            "mention_count": mention_counts.get(sym, 0),
+            "momentum_score": _rank_score(momentum_ranked, sym),
+            "momentum_pct": momentum.get(sym),
+        }
+
+    ranked = sorted(
+        candidates,
+        key=lambda s: (
+            stage1_scores[s]["volume_score"]
+            + stage1_scores[s]["mention_score"]
+            + stage1_scores[s]["momentum_score"]
+        ),
+        reverse=True,
+    )
+    shortlist = ranked[:shortlist_size]
+    logger.info("Stage 1 shortlist (%d symbols): %s", len(shortlist), shortlist)
+    return shortlist, stage1_scores
+
+
+def pick_top_stocks(num_stocks: int = None) -> tuple[list[dict], list[dict]]:
+    """
+    Returns (top, full_shortlist) — both lists of dicts (best first), each:
+      {symbol, final_score, price, volume_score, mention_score, mention_count,
+       momentum_score, momentum_pct, roe, roe_score, ai_score, ai_summary, ai_sources}
+
+    `top` is the num_stocks actually meant to be bought. `full_shortlist`
+    is every symbol that survived the hard exclusions and got AI-researched
+    (i.e. before truncating to num_stocks) — kept around so callers can log
+    it and later check whether the ranking actually added value over the
+    rest of the shortlist, not just whether the top picks went up or down.
+    """
+    num_stocks = num_stocks or config.NUM_STOCKS
+
+    shortlist, stage1_scores = _stage1_shortlist(
+        config.CANDIDATE_POOL_SIZE, config.SHORTLIST_SIZE
+    )
+
+    profiles = get_profiles(shortlist)
+    # Drop shortlist entries we couldn't get fundamentals for — can't
+    # meaningfully research "value"/"ROE"/"CEO" without a profile.
+    usable_symbols = [s for s in shortlist if s in profiles]
+    dropped = set(shortlist) - set(usable_symbols)
+    if dropped:
+        logger.warning("Dropping from shortlist (no fundamentals data): %s", dropped)
+
+    # Hard-exclude ETFs/funds and inactive listings before spending an AI
+    # research call on them — these are never a real operating company
+    # (e.g. "NVD"/"CONL" turned out to be leveraged/inverse single-stock
+    # ETFs riding a real ticker's name), so there's nothing to research.
+    etf_excluded = {
+        s for s in usable_symbols
+        if profiles[s].get("is_etf") or profiles[s].get("is_fund")
+        or not profiles[s].get("is_actively_trading", True)
+    }
+    if etf_excluded:
+        logger.info("Excluding ETFs/funds/inactive listings: %s", etf_excluded)
+    usable_symbols = [s for s in usable_symbols if s not in etf_excluded]
+
+    # Hard-exclude negative ROE (equity destruction, not just "weaker than
+    # peers") and crypto-linked businesses (miners, exchanges, "digital
+    # asset treasury" vehicles) — the user wants grounded, proven
+    # science/tech businesses with real income, not speculative crypto
+    # exposure, so these are disqualifying rather than just down-weighted.
+    negative_roe_excluded = {
+        s for s in usable_symbols
+        if profiles[s].get("roe") is not None and profiles[s]["roe"] < 0
+    }
+    if negative_roe_excluded:
+        logger.info("Excluding negative ROE: %s", negative_roe_excluded)
+
+    crypto_excluded = {
+        s for s in usable_symbols
+        if s not in negative_roe_excluded and _is_crypto_linked(profiles[s])
+    }
+    if crypto_excluded:
+        logger.info("Excluding crypto-linked companies: %s", crypto_excluded)
+
+    usable_symbols = [
+        s for s in usable_symbols
+        if s not in negative_roe_excluded and s not in crypto_excluded
+    ]
+
+    roe_ranked = sorted(
+        usable_symbols,
+        key=lambda s: profiles[s].get("roe") if profiles[s].get("roe") is not None else float("-inf"),
+        reverse=True,
+    )
+
+    # Feed price/momentum into the profile dict so ai_research's prompt has
+    # the same numbers this stage scored on, plus real dated news articles
+    # so the research step has verifiable grounding instead of relying
+    # solely on the model's own (unlogged) web search.
+    for sym in usable_symbols:
+        profiles[sym]["price"] = stage1_scores[sym]["price"]
+        profiles[sym]["momentum_pct"] = stage1_scores[sym]["momentum_pct"]
+        profiles[sym]["recent_news"] = get_recent_news(sym)
+
+    ai_results = research_companies({s: profiles[s] for s in usable_symbols})
+
+    combined = []
+    for sym in usable_symbols:
+        s1 = stage1_scores[sym]
+        roe_score = _rank_score(roe_ranked, sym)
+        ai = ai_results.get(sym, {"score": 0.5, "summary": "", "sources": []})
+        final_score = (
+            config.WEIGHT_VOLUME * s1["volume_score"]
+            + config.WEIGHT_X * s1["mention_score"]
+            + config.WEIGHT_MOMENTUM * s1["momentum_score"]
+            + config.WEIGHT_ROE * roe_score
+            + config.WEIGHT_AI_RESEARCH * ai["score"]
+        )
+        combined.append({
+            "symbol": sym,
+            "final_score": final_score,
+            "price": s1["price"],
+            "volume_score": s1["volume_score"],
+            "mention_score": s1["mention_score"],
+            "mention_count": s1["mention_count"],
+            "momentum_score": s1["momentum_score"],
+            "momentum_pct": s1["momentum_pct"],
+            "roe": profiles[sym].get("roe"),
+            "roe_score": roe_score,
+            "ai_score": ai["score"],
+            "ai_summary": ai["summary"],
+            "ai_sources": ai.get("sources", []),
+        })
+
+    # Hard veto: a stock the AI research flags as clearly disqualifying
+    # (leveraged/inverse ETF, no real business, fraud conviction, etc. —
+    # these show up as scores near 0, not just "low") shouldn't be able to
+    # buy its way into the picks via strong volume/momentum/X signals.
+    # Blending handles ordinary quality tradeoffs fine; it's the wrong tool
+    # for "this isn't a legitimate pick at all."
+    vetoed = [row for row in combined if row["ai_score"] < config.MIN_AI_SCORE_THRESHOLD]
+    if vetoed:
+        logger.info(
+            "Vetoed (ai_score < %.2f): %s",
+            config.MIN_AI_SCORE_THRESHOLD,
+            {row["symbol"]: round(row["ai_score"], 2) for row in vetoed},
+        )
+    combined = [row for row in combined if row["ai_score"] >= config.MIN_AI_SCORE_THRESHOLD]
+
+    combined.sort(key=lambda row: row["final_score"], reverse=True)
+    top = combined[:num_stocks]
+
+    logger.info(
+        "=== Final top %d picks (price $%.2f-$%.2f) ===",
+        len(top), config.MIN_STOCK_PRICE, config.MAX_STOCK_PRICE,
+    )
+    for row in top:
+        roe_str = f"{row['roe']:.1%}" if row["roe"] is not None else "n/a"
+        momentum_str = f"{row['momentum_pct']:+.1%}" if row["momentum_pct"] is not None else "n/a"
+        logger.info(
+            "  %s  $%.2f  final=%.3f  vol=%.2f  x=%.2f(%d)  mom=%.2f(%s)  roe=%s  ai=%.2f — %s",
+            row["symbol"], row["price"], row["final_score"], row["volume_score"],
+            row["mention_score"], row["mention_count"], row["momentum_score"], momentum_str,
+            roe_str, row["ai_score"], row["ai_summary"][:100],
+        )
+
+    return top, combined

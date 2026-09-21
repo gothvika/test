@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Stock Bot{% endblock %}
+{% block content %}
+<h1>Stock Bot</h1>
+<div class="subtitle">
+  <span class="badge {{ 'badge-live' if mode == 'LIVE' else 'badge-paper' }}">{{ mode }} TRADING</span>
+  &nbsp;·&nbsp; Market: {{ "Open" if market_open else "Closed" }}
+  &nbsp;·&nbsp; ${{ "%.2f"|format(dollars_per_stock) }}/stock
+</div>
+
+{% if already_ran %}
+<div class="notice notice-warn">Already ran today — you can still generate a report to review, but order execution stays disabled until tomorrow.</div>
+{% endif %}
+{% if not market_open %}
+<div class="notice notice-info">Market is currently closed (9:30am–4:00pm ET, Mon–Fri). You can generate and review a report, but order execution will be disabled.</div>
+{% endif %}
+
+<div class="card">
+  <h2>Generate today's report</h2>
+  <p style="color: var(--muted); font-size: 13px;">
+    This runs the full picking pipeline — pulls candidates, checks fundamentals, news,
+    and momentum, then runs AI research on the shortlist. It calls paid APIs
+    (Anthropic, FMP, X) each time, so this is a deliberate click, not something
+    that happens automatically.
+  </p>
+  <form method="POST" action="{{ url_for('report') }}">
+    <button type="submit" class="btn btn-confirm">Generate report</button>
+  </form>
+</div>
+
+<a href="{{ url_for('portfolio') }}" class="back-link">View portfolio (live positions &amp; P/L) &rarr;</a>
+&nbsp;·&nbsp;
+<a href="{{ url_for('history_list') }}" class="back-link">View report history &rarr;</a>
+{% endblock %}

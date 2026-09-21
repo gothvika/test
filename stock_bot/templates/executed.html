@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Orders Submitted — Stock Bot{% endblock %}
+{% block content %}
+<h1>Orders submitted</h1>
+<div class="subtitle">
+  <span class="badge {{ 'badge-live' if mode == 'LIVE' else 'badge-paper' }}">{{ mode }} TRADING</span>
+  &nbsp;·&nbsp; {{ succeeded }}/{{ total }} order{{ "s" if total != 1 else "" }} submitted successfully
+</div>
+
+<div class="card">
+  <table>
+    <tr><th>Symbol</th><th>Status</th><th>Order ID</th><th>Notes</th></tr>
+    {% for symbol, r in results.items() %}
+    <tr>
+      <td class="symbol">{{ symbol }}</td>
+      <td class="{{ 'pos' if r.status == 'submitted' else 'neg' }}">{{ r.status }}</td>
+      <td>{{ r.order_id or "—" }}</td>
+      <td class="summary">{{ r.error or "" }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<a href="{{ url_for('index') }}" class="back-link">&larr; Back to start</a>
+{% endblock %}

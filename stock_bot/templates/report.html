@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Today's Picks — Stock Bot{% endblock %}
+{% block content %}
+<h1>Daily Stock Picks — {{ today }}</h1>
+<div class="subtitle">
+  <span class="badge {{ 'badge-live' if mode == 'LIVE' else 'badge-paper' }}">{{ mode }} TRADING</span>
+  &nbsp;·&nbsp; Market: {{ "Open" if market_open else "Closed" }}
+</div>
+
+{% if not market_open %}
+<div class="notice notice-warn">Market is currently closed — orders can't be placed until market hours (9:30am–4:00pm ET, Mon–Fri). You can still review this report.</div>
+{% endif %}
+{% if already_ran %}
+<div class="notice notice-warn">Already ran today — order execution is disabled to avoid buying twice.</div>
+{% endif %}
+
+{% if sell_results %}
+<div class="card">
+  <h2>Stop-loss / take-profit actions taken</h2>
+  <table>
+    <tr><th>Symbol</th><th>Action</th><th>Unrealized P/L</th></tr>
+    {% for symbol, r in sell_results.items() %}
+    <tr>
+      <td class="symbol">{{ symbol }}</td>
+      <td>{{ r.action }}</td>
+      <td class="{{ 'pos' if r.unrealized_plpc is defined and r.unrealized_plpc > 0 else 'neg' if r.unrealized_plpc is defined else '' }}">
+        {{ "%+.1f%%"|format(r.unrealized_plpc * 100) if r.unrealized_plpc is defined else "n/a" }}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Today's picks ({{ picks|length }})</h2>
+  {% if picks %}
+  <table>
+    <tr>
+      <th>#</th><th>Symbol</th><th>Price</th><th>Final score</th>
+      <th>ROE</th><th>Momentum</th><th>AI score</th><th>Rationale</th>
+    </tr>
+    {% for p in picks %}
+    <tr>
+      <td>{{ loop.index }}</td>
+      <td class="symbol">{{ p.symbol }}</td>
+      <td>${{ "%.2f"|format(p.price) }}</td>
+      <td class="score">{{ "%.3f"|format(p.final_score) }}</td>
+      <td class="score {{ 'pos' if p.roe is not none and p.roe > 0 else 'neg' if p.roe is not none else '' }}">
+        {{ "%.1f%%"|format(p.roe * 100) if p.roe is not none else "n/a" }}
+      </td>
+      <td class="score {{ 'pos' if p.momentum_pct is not none and p.momentum_pct > 0 else 'neg' if p.momentum_pct is not none else '' }}">
+        {{ "%+.1f%%"|format(p.momentum_pct * 100) if p.momentum_pct is not none else "n/a" }}
+      </td>
+      <td class="score">{{ "%.2f"|format(p.ai_score) }}</td>
+      <td class="summary">
+        {{ p.ai_summary }}
+        {% if p.ai_sources %}
+        <div class="sources">
+          {% for src in p.ai_sources[:3] %}<a href="{{ src }}" target="_blank" rel="noopener">source</a>{% endfor %}
+        </div>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  <div class="total">Total cost: ${{ "%.2f"|format(dollars_per_stock) }} &times; {{ picks|length }} = ${{ "%.2f"|format(total_cost) }}</div>
+  {% else %}
+  <p>No picks survived today's filters.</p>
+  {% endif %}
+</div>
+
+{% if picks and market_open and not already_ran %}
+<div class="card">
+  <h2>Execute orders?</h2>
+  <p style="color: var(--muted); font-size: 13px;">
+    This will place {{ picks|length }} real {{ mode }} market buy order{{ "s" if picks|length != 1 else "" }}
+    on Alpaca, ${{ "%.2f"|format(dollars_per_stock) }} each. Nothing has been ordered yet.
+  </p>
+  <form method="POST" action="{{ url_for('execute') }}">
+    <input type="hidden" name="run_id" value="{{ run_id }}">
+    {% if mode == "LIVE" %}
+    <label class="confirm-check">
+      <input type="checkbox" name="confirm_live" required>
+      I understand this places REAL orders with REAL money.
+    </label>
+    {% endif %}
+    <button type="submit" class="btn btn-confirm">Confirm &amp; buy</button>
+  </form>
+</div>
+{% elif picks %}
+<div class="card">
+  <span class="btn btn-disabled">Confirm &amp; buy — disabled ({{ "market closed" if not market_open else "already ran today" }})</span>
+</div>
+{% endif %}
+
+<form method="POST" action="{{ url_for('report') }}" style="display:inline;">
+  <button type="submit" class="btn-link">&#8635; Regenerate report (runs the pipeline again — costs another AI research call per stock)</button>
+</form>
+&nbsp;·&nbsp;
+<a href="{{ url_for('index') }}" class="back-link">&larr; Back</a>
+{% endblock %}

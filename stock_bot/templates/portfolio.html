@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Portfolio — Stock Bot{% endblock %}
+{% block content %}
+<h1>Portfolio</h1>
+<div class="subtitle">
+  <span class="badge {{ 'badge-live' if mode == 'LIVE' else 'badge-paper' }}">{{ mode }} TRADING</span>
+  &nbsp;·&nbsp; Live snapshot from Alpaca
+  {% if generated_at %}&nbsp;·&nbsp; As of {{ generated_at }}{% endif %}
+  &nbsp;·&nbsp;
+  <a href="{{ url_for('portfolio') }}" class="btn-link">&#8635; Refresh</a>
+</div>
+
+{% if not positions %}
+<div class="card">
+  <p>No open positions right now.</p>
+  {% if account %}
+  <p style="color: var(--muted); font-size: 13px;">Cash: ${{ "%.2f"|format(account.cash) }} &nbsp;·&nbsp; Portfolio value: ${{ "%.2f"|format(account.portfolio_value) }}</p>
+  {% endif %}
+</div>
+{% else %}
+
+<div class="card">
+  <h2>Holdings ({{ positions|length }})</h2>
+  <table>
+    <tr>
+      <th>Symbol</th><th>Qty</th><th>Avg entry</th><th>Current</th>
+      <th>Value</th><th>P/L</th><th>P/L %</th><th>Sector</th>
+    </tr>
+    {% for p in positions %}
+    <tr>
+      <td class="symbol">{{ p.symbol }}</td>
+      <td class="score">{{ "%.4f"|format(p.qty) }}</td>
+      <td class="score">${{ "%.2f"|format(p.avg_entry_price) }}</td>
+      <td class="score">{{ "$%.2f"|format(p.current_price) if p.current_price is not none else "n/a" }}</td>
+      <td class="score">{{ "$%.2f"|format(p.market_value) if p.market_value is not none else "n/a" }}</td>
+      <td class="score {{ 'pos' if p.unrealized_pl is not none and p.unrealized_pl > 0 else 'neg' if p.unrealized_pl is not none else '' }}">
+        {{ "$%+.2f"|format(p.unrealized_pl) if p.unrealized_pl is not none else "n/a" }}
+      </td>
+      <td class="score {{ 'pos' if p.unrealized_plpc > 0 else 'neg' if p.unrealized_plpc < 0 else '' }}">
+        {{ "%+.1f%%"|format(p.unrealized_plpc * 100) }}
+      </td>
+      <td>{{ p.sector }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <div class="total">
+    Total market value: ${{ "%.2f"|format(total_market_value) }}
+    &nbsp;·&nbsp;
+    <span class="{{ 'pos' if total_unrealized_pl > 0 else 'neg' if total_unrealized_pl < 0 else '' }}">
+      P/L: ${{ "%+.2f"|format(total_unrealized_pl) }}{{ " (%+.1f%%)"|format(total_unrealized_pct * 100) if total_unrealized_pct is not none else "" }}
+    </span>
+  </div>
+  {% if account %}
+  <div style="color: var(--muted); font-size: 13px; margin-top: 8px;">
+    Cash: ${{ "%.2f"|format(account.cash) }} &nbsp;·&nbsp; Total equity: ${{ "%.2f"|format(account.equity) }}
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Sector concentration</h2>
+  <table>
+    <tr><th>Sector</th><th>Value</th><th>% of portfolio</th></tr>
+    {% for s in sector_breakdown %}
+    <tr>
+      <td>{{ s.sector }}</td>
+      <td class="score">${{ "%.2f"|format(s.value) }}</td>
+      <td class="score {{ 'neg' if s.pct > 0.40 else '' }}">
+        {{ "%.1f%%"|format(s.pct * 100) }}{{ "  — over 40% of portfolio in one sector" if s.pct > 0.40 else "" }}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
+<a href="{{ url_for('index') }}" class="back-link">&larr; Back</a>
+{% endblock %}

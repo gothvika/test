@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}{{ record.date }} — Stock Bot{% endblock %}
+{% block content %}
+<h1>Report — {{ record.date }}</h1>
+<div class="subtitle">
+  <span class="badge {{ 'badge-live' if record.mode == 'LIVE' else 'badge-paper' }}">{{ record.mode }} TRADING</span>
+  &nbsp;·&nbsp; Market open that day: {{ "Yes" if record.market_open else "No" }}
+  &nbsp;·&nbsp; {{ "Orders executed" if record.executed else "Not executed" }}
+</div>
+
+{% if sell_results %}
+<div class="card">
+  <h2>Stop-loss / take-profit actions</h2>
+  <table>
+    <tr><th>Symbol</th><th>Action</th><th>Unrealized P/L</th></tr>
+    {% for symbol, r in sell_results.items() %}
+    <tr>
+      <td class="symbol">{{ symbol }}</td>
+      <td>{{ r.action }}</td>
+      <td class="{{ 'pos' if r.unrealized_plpc is defined and r.unrealized_plpc > 0 else 'neg' if r.unrealized_plpc is defined else '' }}">
+        {{ "%+.1f%%"|format(r.unrealized_plpc * 100) if r.unrealized_plpc is defined else "n/a" }}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Picks that day ({{ picks|length }})</h2>
+  {% if picks %}
+  <table>
+    <tr><th>Symbol</th><th>Price</th><th>Final score</th><th>ROE</th><th>Momentum</th><th>AI score</th><th>Rationale</th></tr>
+    {% for p in picks %}
+    <tr>
+      <td class="symbol">{{ p.symbol }}</td>
+      <td>${{ "%.2f"|format(p.price) }}</td>
+      <td class="score">{{ "%.3f"|format(p.final_score) }}</td>
+      <td class="score {{ 'pos' if p.roe is not none and p.roe > 0 else 'neg' if p.roe is not none else '' }}">
+        {{ "%.1f%%"|format(p.roe * 100) if p.roe is not none else "n/a" }}
+      </td>
+      <td class="score {{ 'pos' if p.momentum_pct is not none and p.momentum_pct > 0 else 'neg' if p.momentum_pct is not none else '' }}">
+        {{ "%+.1f%%"|format(p.momentum_pct * 100) if p.momentum_pct is not none else "n/a" }}
+      </td>
+      <td class="score">{{ "%.2f"|format(p.ai_score) }}</td>
+      <td class="summary">{{ p.ai_summary }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p>No picks that day.</p>
+  {% endif %}
+</div>
+
+{% if record.executed %}
+<div class="card">
+  <h2>Orders placed</h2>
+  <table>
+    <tr><th>Symbol</th><th>Status</th><th>Scored price</th><th>Filled price</th><th>Slippage</th><th>Order ID</th></tr>
+    {% for symbol, r in execution.items() %}
+    <tr>
+      <td class="symbol">{{ symbol }}</td>
+      <td class="{{ 'pos' if r.status == 'submitted' else 'neg' }}">{{ r.status }}</td>
+      <td>{{ "$%.2f"|format(r.scored_price) if r.scored_price is defined and r.scored_price is not none else "n/a" }}</td>
+      <td>{{ "$" ~ r.filled_avg_price if r.filled_avg_price is defined and r.filled_avg_price else "n/a" }}</td>
+      <td class="{{ 'neg' if r.filled_avg_price and r.scored_price and (r.filled_avg_price|float) > r.scored_price else 'pos' if r.filled_avg_price and r.scored_price else '' }}">
+        {% if r.filled_avg_price and r.scored_price %}
+          {{ "%+.2f%%"|format(((r.filled_avg_price|float) - r.scored_price) / r.scored_price * 100) }}
+        {% else %}n/a{% endif %}
+      </td>
+      <td>{{ r.order_id or "—" }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Full shortlist that day ({{ shortlist_rows|length }}) — bought vs. skipped</h2>
+  <p style="color: var(--muted); font-size: 13px;">
+    "Hypothetical return" is the live current price vs. the price recorded that day — for
+    skipped stocks, this is "what if you'd bought it anyway," the same comparison
+    review_history.py uses to check whether the ranking added value.
+  </p>
+  {% if shortlist_rows %}
+  <table>
+    <tr><th>Symbol</th><th>Bought?</th><th>Price then</th><th>Price now</th><th>Hypothetical return</th><th>Final score</th><th>AI score</th></tr>
+    {% for e in shortlist_rows %}
+    <tr>
+      <td class="symbol">{{ e.symbol }}</td>
+      <td class="{{ 'pos' if e.in_top_n else '' }}">{{ "Bought" if e.in_top_n else "Skipped" }}</td>
+      <td>${{ "%.2f"|format(e.price) }}</td>
+      <td>{{ "$%.2f"|format(e.current_price) if e.current_price is not none else "n/a" }}</td>
+      <td class="{{ 'pos' if e.hypothetical_return is not none and e.hypothetical_return > 0 else 'neg' if e.hypothetical_return is not none else '' }}">
+        {{ "%+.1f%%"|format(e.hypothetical_return * 100) if e.hypothetical_return is not none else "n/a" }}
+      </td>
+      <td class="score">{{ "%.3f"|format(e.final_score) if e.final_score is not none else "n/a" }}</td>
+      <td class="score">{{ "%.2f"|format(e.ai_score) if e.ai_score is not none else "n/a" }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p>No shortlist data for this day (report generated before this feature was added).</p>
+  {% endif %}
+</div>
+
+<a href="{{ url_for('history_list') }}" class="back-link">&larr; Back to history</a>
+{% endblock %}
