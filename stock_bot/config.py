@@ -68,6 +68,13 @@ Optional:
                             clear red flag (leveraged/inverse ETF, no
                             real business, fraud conviction, etc.) just
                             get diluted into the blend.
+
+Hard exclusions (not configurable — see scorer.py):
+  - Negative ROE (equity-destroying, not just weaker than peers).
+  - Crypto-linked businesses (miners, exchanges, "digital asset treasury"
+    vehicles) — matched by keyword against sector/industry/name/description.
+    The strategy targets grounded, proven science/tech businesses with real
+    income rather than speculative crypto exposure.
 """
 
 import os

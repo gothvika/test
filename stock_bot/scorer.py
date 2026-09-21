@@ -20,6 +20,22 @@ from ai_research import research_companies
 
 logger = logging.getLogger("stock_bot.scorer")
 
+# Companies whose business is holding/mining/trading crypto assets rather
+# than a real operating business with its own products/revenue (crypto
+# exchanges, "digital asset treasury" vehicles, miners) — matched against
+# sector/industry/name/description text from the fundamentals profile.
+CRYPTO_KEYWORDS = (
+    "bitcoin", "crypto", "blockchain", "ethereum", "digital asset",
+    "cryptocurrency", "web3",
+)
+
+
+def _is_crypto_linked(profile: dict) -> bool:
+    text = " ".join(
+        str(profile.get(field) or "") for field in ("sector", "industry", "name", "description")
+    ).lower()
+    return any(keyword in text for keyword in CRYPTO_KEYWORDS)
+
 
 def _rank_score(ordered_items: list, item: str) -> float:
     """1.0 for best rank, decaying toward 0 for worse ranks; 0 if absent."""
@@ -119,6 +135,30 @@ def pick_top_stocks(num_stocks: int = None) -> list[dict]:
     if etf_excluded:
         logger.info("Excluding ETFs/funds/inactive listings: %s", etf_excluded)
     usable_symbols = [s for s in usable_symbols if s not in etf_excluded]
+
+    # Hard-exclude negative ROE (equity destruction, not just "weaker than
+    # peers") and crypto-linked businesses (miners, exchanges, "digital
+    # asset treasury" vehicles) — the user wants grounded, proven
+    # science/tech businesses with real income, not speculative crypto
+    # exposure, so these are disqualifying rather than just down-weighted.
+    negative_roe_excluded = {
+        s for s in usable_symbols
+        if profiles[s].get("roe") is not None and profiles[s]["roe"] < 0
+    }
+    if negative_roe_excluded:
+        logger.info("Excluding negative ROE: %s", negative_roe_excluded)
+
+    crypto_excluded = {
+        s for s in usable_symbols
+        if s not in negative_roe_excluded and _is_crypto_linked(profiles[s])
+    }
+    if crypto_excluded:
+        logger.info("Excluding crypto-linked companies: %s", crypto_excluded)
+
+    usable_symbols = [
+        s for s in usable_symbols
+        if s not in negative_roe_excluded and s not in crypto_excluded
+    ]
 
     roe_ranked = sorted(
         usable_symbols,
