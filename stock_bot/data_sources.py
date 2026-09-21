@@ -50,6 +50,46 @@ def get_most_active_stocks(limit: int = None) -> list[str]:
     return symbols
 
 
+def get_top_movers(limit: int = None) -> list[str]:
+    """
+    Returns ticker symbols among today's top % gainers, via Alpaca's movers
+    screener. This is a different cut than get_most_active_stocks(): a
+    stock can be having a strong move without (yet) being one of the
+    highest-VOLUME names — the volume screener structurally can't surface
+    that, since it only ever ranks names that are already heavily traded.
+    Merging this in gives the shortlist a shot at "not already the most
+    popular thing trading today" candidates.
+
+    Not yet verified against the live API from this environment
+    (data.alpaca.markets is network-blocked here) — response field names
+    assumed from Alpaca's published screener schema. Fails soft (returns
+    []) rather than raising, since this is a supplementary source and
+    shouldn't take down a run if it errors.
+    """
+    limit = config.MOVERS_POOL_SIZE if limit is None else limit
+    if limit <= 0:
+        return []
+
+    url = f"{config.ALPACA_DATA_BASE_URL}/v1beta1/screener/stocks/movers"
+    headers = {
+        "APCA-API-KEY-ID": config.ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": config.ALPACA_SECRET_KEY,
+    }
+    params = {"top": limit}
+
+    try:
+        resp = requests.get(url, headers=headers, params=params, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        logger.warning("Movers screener lookup failed: %s. Continuing without movers.", exc)
+        return []
+
+    symbols = [row["symbol"] for row in data.get("gainers", []) if "symbol" in row]
+    logger.info("Fetched %d top-gainer symbols from Alpaca", len(symbols))
+    return symbols
+
+
 def get_latest_prices(symbols: list[str]) -> dict[str, float]:
     """
     Returns {symbol: latest_trade_price} via Alpaca's latest-trades endpoint.

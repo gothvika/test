@@ -38,6 +38,17 @@ Optional:
   SHORTLIST_SIZE          - how many candidates advance to deep AI research
                             (fundamentals + CEO + prospects), default 12.
                             Keep this modest — each one costs an API call.
+  MOVERS_POOL_SIZE        - how many of today's top % gainers (Alpaca's
+                            movers screener, separate from most-actives) to
+                            merge into the candidate pool, default 25. This
+                            exists because the most-actives screener can
+                            only ever surface names that are ALREADY
+                            heavily traded — a stock having a strong move
+                            without (yet) being top-volume would never
+                            enter the pool otherwise. Set to 0 to disable.
+  NEWS_ARTICLES_PER_SYMBOL - how many recent news articles (from FMP) to
+                            fetch per shortlisted symbol and hand to the AI
+                            research step as grounding context, default 4.
   ALPACA_DATA_FEED        - "iex" (default, free/paper accounts) or "sip"
                             (needs a paid market-data subscription)
   MAX_STOCK_PRICE         - only consider stocks trading below this price,
@@ -72,9 +83,19 @@ Optional:
 Hard exclusions (not configurable — see scorer.py):
   - Negative ROE (equity-destroying, not just weaker than peers).
   - Crypto-linked businesses (miners, exchanges, "digital asset treasury"
-    vehicles) — matched by keyword against sector/industry/name/description.
-    The strategy targets grounded, proven science/tech businesses with real
-    income rather than speculative crypto exposure.
+    vehicles) — matched by keyword against sector/industry/name/description,
+    plus a small hand-maintained list of known crypto-adjacent tickers
+    whose FMP profile text doesn't reliably self-describe as crypto (e.g.
+    legacy company names). The strategy targets grounded, proven
+    science/tech businesses with real income rather than speculative
+    crypto exposure.
+
+Risk management (sell side — this bot previously only ever bought):
+  STOP_LOSS_PCT           - default -0.20 (sell a position once it's down
+                            20% from average entry price). Always active.
+  TAKE_PROFIT_PCT         - default 0 (disabled — "let winners ride").
+                            Set e.g. to 0.40 to sell a position once it's
+                            up 40% from average entry price.
 """
 
 import os
@@ -117,6 +138,8 @@ DOLLARS_PER_STOCK = float(os.getenv("DOLLARS_PER_STOCK", "1.00"))
 NUM_STOCKS = int(os.getenv("NUM_STOCKS", "10"))
 CANDIDATE_POOL_SIZE = int(os.getenv("CANDIDATE_POOL_SIZE", "50"))
 SHORTLIST_SIZE = int(os.getenv("SHORTLIST_SIZE", "12"))
+MOVERS_POOL_SIZE = int(os.getenv("MOVERS_POOL_SIZE", "25"))
+NEWS_ARTICLES_PER_SYMBOL = int(os.getenv("NEWS_ARTICLES_PER_SYMBOL", "4"))
 
 MAX_STOCK_PRICE = float(os.getenv("MAX_STOCK_PRICE", "30.00"))
 MOMENTUM_LOOKBACK_DAYS = int(os.getenv("MOMENTUM_LOOKBACK_DAYS", "20"))
@@ -128,6 +151,9 @@ WEIGHT_ROE = float(os.getenv("WEIGHT_ROE", "0.20"))
 WEIGHT_AI_RESEARCH = float(os.getenv("WEIGHT_AI_RESEARCH", "0.35"))
 
 MIN_AI_SCORE_THRESHOLD = float(os.getenv("MIN_AI_SCORE_THRESHOLD", "0.10"))
+
+STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "-0.20"))
+TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", "0"))  # 0 = disabled
 
 X_LOOKBACK_HOURS = int(os.getenv("X_LOOKBACK_HOURS", "24"))
 X_MAX_RESULTS_PER_QUERY = int(os.getenv("X_MAX_RESULTS_PER_QUERY", "100"))

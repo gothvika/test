@@ -16,6 +16,10 @@ Safety:
   - Keeps a small on-disk record (last_run.json) so re-running the script
     on the same calendar day won't buy twice.
   - Skips the run (without buying anything) if the market is closed.
+  - Before buying, checks every existing position against
+    config.STOP_LOSS_PCT / config.TAKE_PROFIT_PCT and sells anything that's
+    crossed a threshold — this bot previously only ever bought, so a
+    losing pick would sit there indefinitely with no exit.
 """
 
 import json
@@ -26,7 +30,7 @@ from datetime import date
 
 import config
 from scorer import pick_top_stocks
-from trader import buy_dollar_amount, check_market_open
+from trader import buy_dollar_amount, check_market_open, apply_stop_loss_and_take_profit
 
 logging.basicConfig(
     level=logging.INFO,
@@ -79,6 +83,10 @@ def main():
     mode = "PAPER" if config.ALPACA_PAPER else "LIVE"
     logger.info("=== Starting daily run (%s trading) ===", mode)
 
+    sell_results = apply_stop_loss_and_take_profit()
+    if sell_results:
+        logger.info("Stop-loss/take-profit actions: %s", sell_results)
+
     try:
         picks = pick_top_stocks()
     except Exception:
@@ -106,6 +114,7 @@ def main():
 
     state["last_run_date"] = today
     state["last_picks"] = results
+    state["sell_actions"] = sell_results
     _save_state(state)
 
     succeeded = sum(1 for r in results.values() if r["status"] == "submitted")

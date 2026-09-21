@@ -1,21 +1,25 @@
 """
 Two-stage scoring, targeting cheap, lower-volume, quality-momentum stocks:
 
-  Stage 1 (cheap, broad): pull Alpaca's active-stock pool, keep only names
-  priced under MAX_STOCK_PRICE, then rank the survivors by a blend of
-  (inverted) trading volume, X mentions, and price momentum; keep the
-  top SHORTLIST_SIZE.
+  Stage 1 (cheap, broad): pull Alpaca's active-stock pool AND today's top
+  gainers (movers), keep only names priced under MAX_STOCK_PRICE, then
+  rank the survivors by a blend of (inverted) trading volume, X mentions,
+  and price momentum; keep the top SHORTLIST_SIZE.
 
   Stage 2 (deeper, narrow): for just the shortlist, pull fundamentals
-  (value/CEO/sector/ROE) and run AI web-search research (CEO reputation,
-  future prospects, valuation sanity check). Combine all signals into a
-  final score and return the top NUM_STOCKS.
+  (value/CEO/sector/ROE) and recent news, hard-exclude ETFs/negative-ROE/
+  crypto-linked names, then run AI web-search research (CEO reputation,
+  future prospects, valuation sanity check) grounded in that real news.
+  Combine all signals into a final score and return the top NUM_STOCKS.
 """
 
 import logging
+import re
+
 import config
-from data_sources import get_most_active_stocks, get_x_mentions, get_latest_prices, get_momentum
+from data_sources import get_most_active_stocks, get_top_movers, get_x_mentions, get_latest_prices, get_momentum
 from fundamentals import get_profiles
+from news_sources import get_recent_news
 from ai_research import research_companies
 
 logger = logging.getLogger("stock_bot.scorer")
@@ -24,17 +28,34 @@ logger = logging.getLogger("stock_bot.scorer")
 # than a real operating business with its own products/revenue (crypto
 # exchanges, "digital asset treasury" vehicles, miners) — matched against
 # sector/industry/name/description text from the fundamentals profile.
-CRYPTO_KEYWORDS = (
-    "bitcoin", "crypto", "blockchain", "ethereum", "digital asset",
-    "cryptocurrency", "web3",
+#
+# `crypto(?!graph)` deliberately excludes "cryptography"/"cryptographic" —
+# a naive substring match on "crypto" would have false-positived on any
+# company describing itself as doing encryption/security work, since
+# "cryptography" contains "crypto" as a literal substring.
+_CRYPTO_KEYWORD_PATTERN = re.compile(
+    r"\b(bitcoin|crypto(?!graph)\w*|blockchain|ethereum|digital[- ]asset\w*"
+    r"|web3|stablecoin\w*|digital[- ]currenc\w*)\b",
+    re.IGNORECASE,
 )
+
+# Tickers whose FMP profile text doesn't reliably self-describe as
+# crypto-related (legacy company names, holding-company structures) but
+# whose actual business is crypto mining/treasury/exchange — a keyword
+# scan alone misses these. Hand-maintained, not exhaustive.
+KNOWN_CRYPTO_SYMBOLS = {
+    "MSTR", "COIN", "MARA", "RIOT", "CLSK", "BITF", "HUT", "CIFR", "WULF",
+    "BTBT", "SDIG", "IREN", "CORZ", "BMNR", "SBET",
+}
 
 
 def _is_crypto_linked(profile: dict) -> bool:
+    if profile.get("symbol") in KNOWN_CRYPTO_SYMBOLS:
+        return True
     text = " ".join(
         str(profile.get(field) or "") for field in ("sector", "industry", "name", "description")
-    ).lower()
-    return any(keyword in text for keyword in CRYPTO_KEYWORDS)
+    )
+    return bool(_CRYPTO_KEYWORD_PATTERN.search(text))
 
 
 def _rank_score(ordered_items: list, item: str) -> float:
@@ -51,9 +72,22 @@ def _stage1_shortlist(pool_size: int, shortlist_size: int) -> tuple[list[str], d
     if not volume_ranked:
         raise RuntimeError("No candidate symbols returned from Alpaca screener.")
 
-    prices = get_latest_prices(volume_ranked)
+    # The most-actives screener can only ever surface names that are
+    # ALREADY heavily traded. Merge in today's top gainers too, so a stock
+    # having a strong move without (yet) being top-volume gets a shot at
+    # entering the pool as well.
+    movers = get_top_movers(limit=config.MOVERS_POOL_SIZE)
+    new_from_movers = [s for s in movers if s not in volume_ranked]
+    if new_from_movers:
+        logger.info(
+            "Adding %d symbols from movers screener not already in most-actives: %s",
+            len(new_from_movers), new_from_movers,
+        )
+    all_symbols = volume_ranked + new_from_movers
+
+    prices = get_latest_prices(all_symbols)
     candidates = [
-        sym for sym in volume_ranked
+        sym for sym in all_symbols
         if prices.get(sym) is not None and prices[sym] < config.MAX_STOCK_PRICE
     ]
     if not candidates:
@@ -62,7 +96,7 @@ def _stage1_shortlist(pool_size: int, shortlist_size: int) -> tuple[list[str], d
         )
     logger.info(
         "Price filter (<$%.2f) kept %d/%d candidates",
-        config.MAX_STOCK_PRICE, len(candidates), len(volume_ranked),
+        config.MAX_STOCK_PRICE, len(candidates), len(all_symbols),
     )
 
     mention_counts = get_x_mentions(candidates)
@@ -167,10 +201,13 @@ def pick_top_stocks(num_stocks: int = None) -> list[dict]:
     )
 
     # Feed price/momentum into the profile dict so ai_research's prompt has
-    # the same numbers this stage scored on.
+    # the same numbers this stage scored on, plus real dated news articles
+    # so the research step has verifiable grounding instead of relying
+    # solely on the model's own (unlogged) web search.
     for sym in usable_symbols:
         profiles[sym]["price"] = stage1_scores[sym]["price"]
         profiles[sym]["momentum_pct"] = stage1_scores[sym]["momentum_pct"]
+        profiles[sym]["recent_news"] = get_recent_news(sym)
 
     ai_results = research_companies({s: profiles[s] for s in usable_symbols})
 
@@ -178,7 +215,7 @@ def pick_top_stocks(num_stocks: int = None) -> list[dict]:
     for sym in usable_symbols:
         s1 = stage1_scores[sym]
         roe_score = _rank_score(roe_ranked, sym)
-        ai = ai_results.get(sym, {"score": 0.5, "summary": ""})
+        ai = ai_results.get(sym, {"score": 0.5, "summary": "", "sources": []})
         final_score = (
             config.WEIGHT_VOLUME * s1["volume_score"]
             + config.WEIGHT_X * s1["mention_score"]
@@ -199,6 +236,7 @@ def pick_top_stocks(num_stocks: int = None) -> list[dict]:
             "roe_score": roe_score,
             "ai_score": ai["score"],
             "ai_summary": ai["summary"],
+            "ai_sources": ai.get("sources", []),
         })
 
     # Hard veto: a stock the AI research flags as clearly disqualifying

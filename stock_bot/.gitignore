@@ -3,3 +3,4 @@ last_run.json
 bot.log
 __pycache__/
 *.pyc
+.pytest_cache/

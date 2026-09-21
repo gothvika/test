@@ -1,11 +1,15 @@
 """
-Uses the Claude API (with web search) to research each shortlisted company:
+Uses the Claude API (with web search, grounded in real news articles
+already fetched via news_sources.py) to research each shortlisted company:
 recent news, CEO track record/reputation, and forward-looking prospects —
 combined with the fundamentals pulled from fundamentals.py — and asks for a
-single 0-1 suitability score plus a short written rationale.
+single 0-1 suitability score, a short written rationale, and (where
+available) the source URLs that drove the score.
 
 This is a heuristic research assistant, not investment advice. Its scores
-are opinions synthesized from public web content, not guarantees.
+are opinions synthesized from public web content and news snippets, not
+guarantees — grounding in real articles makes the underlying facts more
+checkable, but the score itself is still the model's judgment call.
 """
 
 import logging
@@ -47,6 +51,15 @@ SUBMIT_RESULT_TOOL = {
                 "type": "string",
                 "description": "2-3 sentence plain-English rationale citing what you found.",
             },
+            "sources": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "URLs (from the provided news articles and/or your own web search) "
+                    "for the facts that most influenced the score — for an audit trail, "
+                    "not required to be exhaustive."
+                ),
+            },
         },
         "required": ["score", "summary"],
     },
@@ -66,7 +79,12 @@ Return on equity (TTM): {roe}
 Trailing price momentum ({momentum_days}-day): {momentum_pct}
 Business description: {description}
 
-Please research using web search:
+Recent news articles (fetched from Financial Modeling Prep — these are \
+real, dated, source-linked articles; treat facts in them as verified, and \
+prefer them over anything you find independently when they overlap):
+{recent_news}
+
+Please research:
 1. The current CEO's track record and reputation (tenure, past results, any \
 recent controversies).
 2. The company's near-to-medium-term prospects (recent earnings trends, \
@@ -74,17 +92,38 @@ guidance, major news in the last 1-3 months, competitive position).
 3. Whether the current valuation looks reasonable, stretched, or cheap \
 relative to the sector, given what you find.
 
+Use web search only to fill in what the articles above don't cover (e.g. \
+CEO background, older context, sector comparisons) — don't re-derive facts \
+the articles already give you, and don't contradict them without a good \
+reason.
+
 When you're done researching, call submit_research_result with your final \
-score and summary — don't just write the answer out as text.
+score, summary, and (if you have them) the source URLs that most drove the \
+score — don't just write the answer out as text.
 """
+
+
+def _format_news(articles: list) -> str:
+    if not articles:
+        return "(none available)"
+    lines = []
+    for a in articles:
+        date = a.get("date") or "unknown date"
+        title = a.get("title") or "(untitled)"
+        url = a.get("url") or "(no url)"
+        snippet = a.get("snippet") or ""
+        lines.append(f"- [{date}] {title}\n  {snippet}\n  Source: {url}")
+    return "\n".join(lines)
 
 
 def research_company(profile: dict) -> dict:
     """
-    Runs one company through Claude + web search. Returns
-    {"symbol": ..., "score": float, "summary": str}. On failure, returns a
-    neutral score of 0.5 with an explanatory summary rather than crashing
-    the whole daily run over one bad lookup.
+    Runs one company through Claude + web search, grounded in any recent
+    news articles already fetched onto profile["recent_news"] (see
+    news_sources.get_recent_news / scorer.py). Returns
+    {"symbol": ..., "score": float, "summary": str, "sources": list[str]}.
+    On failure, returns a neutral score of 0.5 with an explanatory summary
+    rather than crashing the whole daily run over one bad lookup.
     """
     symbol = profile["symbol"]
     roe = profile.get("roe")
@@ -101,6 +140,7 @@ def research_company(profile: dict) -> dict:
         momentum_days=config.MOMENTUM_LOOKBACK_DAYS,
         momentum_pct=f"{momentum_pct:+.1%}" if momentum_pct is not None else "unknown",
         description=(profile.get("description") or "")[:600],
+        recent_news=_format_news(profile.get("recent_news") or []),
     )
 
     try:
@@ -151,13 +191,16 @@ def research_company(profile: dict) -> dict:
         score = float(result_block.input.get("score", 0.5))
         score = max(0.0, min(1.0, score))  # clamp
         summary = str(result_block.input.get("summary", "")).strip()
+        sources = [str(s) for s in (result_block.input.get("sources") or [])]
 
         logger.info("AI research for %s: score=%.2f — %s", symbol, score, summary)
-        return {"symbol": symbol, "score": score, "summary": summary}
+        if sources:
+            logger.info("AI research sources for %s: %s", symbol, sources)
+        return {"symbol": symbol, "score": score, "summary": summary, "sources": sources}
 
     except Exception as exc:
         logger.warning("AI research failed for %s: %s. Using neutral score.", symbol, exc)
-        return {"symbol": symbol, "score": 0.5, "summary": f"Research unavailable: {exc}"}
+        return {"symbol": symbol, "score": 0.5, "summary": f"Research unavailable: {exc}", "sources": []}
 
 
 def research_companies(profiles: dict[str, dict]) -> dict[str, dict]:
