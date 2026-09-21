@@ -34,6 +34,7 @@ from datetime import date
 from flask import Flask, render_template, request, url_for
 
 import config
+import history
 from scorer import pick_top_stocks
 from trader import buy_dollar_amount, check_market_open, apply_stop_loss_and_take_profit
 
@@ -139,6 +140,8 @@ def report():
     _last_report.clear()  # only the most recent report is ever valid
     _last_report[run_id] = {"picks": picks, "sell_results": sell_results}
 
+    history.record_report(picks, sell_results, market_open, _mode())
+
     return render_template(
         "report.html",
         run_id=run_id,
@@ -195,6 +198,8 @@ def execute():
     state["last_picks"] = results
     state["sell_actions"] = cached["sell_results"]
     _save_state(state)
+
+    history.record_execution(results)
 
     _last_report.pop(run_id, None)  # one-time use
 

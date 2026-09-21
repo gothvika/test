@@ -29,6 +29,7 @@ import sys
 from datetime import date
 
 import config
+import history
 from scorer import pick_top_stocks
 from trader import buy_dollar_amount, check_market_open, apply_stop_loss_and_take_profit
 
@@ -95,7 +96,10 @@ def main():
 
     if not picks:
         logger.warning("No stocks were picked. Nothing to buy today.")
+        history.record_report(picks, sell_results, market_open=True, mode=mode)
         return
+
+    history.record_report(picks, sell_results, market_open=True, mode=mode)
 
     results = {}
     for pick in picks:
@@ -116,6 +120,8 @@ def main():
     state["last_picks"] = results
     state["sell_actions"] = sell_results
     _save_state(state)
+
+    history.record_execution(results)
 
     succeeded = sum(1 for r in results.values() if r["status"] == "submitted")
     logger.info("=== Run complete: %d/%d orders submitted ===", succeeded, len(picks))
