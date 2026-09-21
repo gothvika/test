@@ -6,17 +6,16 @@ logged or checked after the fact.
 
 Docs: https://site.financialmodelingprep.com/developer/docs
 
-NOTE: endpoint path/response field names are assumed from FMP's published
-/stable/ API docs, following the same pattern as fundamentals.py's
-profile/income-statement/balance-sheet-statement calls. Not yet confirmed
-against the live API from this environment (financialmodelingprep.com is
-network-blocked here) — needs a real test, and the field names below may
-need adjusting once it's run live (same as /stable/profile did).
+Endpoint path and response field names (symbol, publishedDate, publisher,
+title, image, site, text, url) confirmed live against
+/stable/news/stock?symbols=...&limit=...&apikey=... — verified 2026-09-21
+via test_fmp_news.py against AAPL.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 
 import requests
 
@@ -24,11 +23,38 @@ import config
 
 logger = logging.getLogger("stock_bot.news_sources")
 
+# Auto-generated "institutional holdings" filler articles (a fund/bank
+# bought or trimmed some shares, per its latest 13F) — confirmed live to
+# make up the bulk of a typical feed (4 of 5 articles fetched for AAPL).
+# These are template-written from routine SEC filings, not analysis or
+# news in any useful sense, so they'd just crowd out real signal in the
+# AI research prompt. Matched on the boilerplate disclosure phrasing every
+# one of them uses, not on publisher name (too fragile/endless to
+# maintain a mill blocklist).
+_INSTITUTIONAL_FILING_PATTERN = re.compile(
+    r"disclosure with the (?:securities and exchange commission|sec)"
+    r"|form 13f filing"
+    r"|\b13f filing\b"
+    r"|according to (?:its|the company.s) most recent (?:13f )?filing",
+    re.IGNORECASE,
+)
+
+# Over-fetch from FMP so that filtering out boilerplate still leaves
+# `limit` real articles where possible, without unbounded cost.
+_FETCH_MULTIPLIER = 5
+_MAX_FETCH = 25
+
+
+def _is_institutional_filing_boilerplate(row: dict) -> bool:
+    text = f"{row.get('title') or ''} {row.get('text') or ''}"
+    return bool(_INSTITUTIONAL_FILING_PATTERN.search(text))
+
 
 def get_recent_news(symbol: str, limit: int = None) -> list[dict]:
     """
-    Returns up to `limit` recent news articles for `symbol`, most recent
-    first, as [{"title": ..., "date": ..., "url": ..., "snippet": ...}].
+    Returns up to `limit` recent, non-boilerplate news articles for
+    `symbol`, most recent first, as
+    [{"title": ..., "date": ..., "url": ..., "snippet": ...}].
 
     Never raises — returns [] on any lookup failure (missing coverage,
     rate limit, endpoint hiccup), so a news-API problem can't take down a
@@ -36,8 +62,10 @@ def get_recent_news(symbol: str, limit: int = None) -> list[dict]:
     available" and falls back to the model's own web search only.
     """
     limit = limit or config.NEWS_ARTICLES_PER_SYMBOL
+    fetch_limit = min(limit * _FETCH_MULTIPLIER, _MAX_FETCH)
+
     url = f"{config.FMP_BASE_URL}/news/stock"
-    params = {"symbols": symbol, "limit": limit, "apikey": config.FMP_API_KEY}
+    params = {"symbols": symbol, "limit": fetch_limit, "apikey": config.FMP_API_KEY}
 
     try:
         resp = requests.get(url, params=params, timeout=15)
@@ -51,8 +79,13 @@ def get_recent_news(symbol: str, limit: int = None) -> list[dict]:
         logger.warning("Unexpected news response shape for %s: %r", symbol, type(rows))
         return []
 
+    filtered_rows = [row for row in rows if not _is_institutional_filing_boilerplate(row)]
+    dropped = len(rows) - len(filtered_rows)
+    if dropped:
+        logger.info("Filtered %d institutional-filing boilerplate article(s) for %s", dropped, symbol)
+
     articles = []
-    for row in rows[:limit]:
+    for row in filtered_rows[:limit]:
         articles.append({
             "title": row.get("title"),
             "date": row.get("publishedDate"),
@@ -60,5 +93,5 @@ def get_recent_news(symbol: str, limit: int = None) -> list[dict]:
             "snippet": (row.get("text") or "")[:300],
         })
 
-    logger.info("Fetched %d news articles for %s", len(articles), symbol)
+    logger.info("Fetched %d usable news articles for %s", len(articles), symbol)
     return articles
