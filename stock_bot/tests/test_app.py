@@ -180,6 +180,7 @@ def test_portfolio_shows_positions_and_sector(client):
     assert resp.status_code == 200
     assert b"GOOD" in resp.data
     assert b"Technology" in resp.data
+    assert b"Refresh" in resp.data
 
 
 def test_portfolio_handles_no_positions(client):

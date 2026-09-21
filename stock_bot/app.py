@@ -29,7 +29,7 @@ import logging
 import os
 import secrets
 import sys
-from datetime import date
+from datetime import date, datetime
 
 from flask import Flask, render_template, request, url_for
 
@@ -181,6 +181,7 @@ def portfolio():
         total_unrealized_pct=(total_unrealized_pl / total_cost_basis if total_cost_basis else None),
         sector_breakdown=sector_breakdown,
         mode=_mode(),
+        generated_at=datetime.now().strftime("%H:%M:%S"),
     )
 
 

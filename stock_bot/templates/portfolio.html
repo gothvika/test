@@ -5,6 +5,9 @@
 <div class="subtitle">
   <span class="badge {{ 'badge-live' if mode == 'LIVE' else 'badge-paper' }}">{{ mode }} TRADING</span>
   &nbsp;·&nbsp; Live snapshot from Alpaca
+  {% if generated_at %}&nbsp;·&nbsp; As of {{ generated_at }}{% endif %}
+  &nbsp;·&nbsp;
+  <a href="{{ url_for('portfolio') }}" class="btn-link">&#8635; Refresh</a>
 </div>
 
 {% if not positions %}
