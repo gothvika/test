@@ -105,16 +105,23 @@ def research_company(profile: dict) -> dict:
 
     try:
         client = _get_client()
+        is_haiku = "haiku" in config.ANTHROPIC_MODEL
+
+        # _20260209 has built-in dynamic filtering, which strips boilerplate
+        # from search results before they enter context — directly targets
+        # this call's dominant cost (~22k input tokens/call observed, almost
+        # all from search results). But it relies on programmatic tool
+        # calling under the hood, which Haiku 4.5 doesn't support (confirmed
+        # live: 400 "does not support programmatic tool calling") — fall
+        # back to the basic variant there. max_uses caps runaway search
+        # chains on any one call.
+        web_search_type = "web_search_20250305" if is_haiku else "web_search_20260209"
+
         request_kwargs = dict(
             model=config.ANTHROPIC_MODEL,
             max_tokens=2048,
             tools=[
-                # _20260209 has built-in dynamic filtering, which strips
-                # boilerplate from search results before they enter context —
-                # directly targets this call's dominant cost (~22k input
-                # tokens/call observed, almost all from search results).
-                # max_uses caps runaway search chains on any one call.
-                {"type": "web_search_20260209", "name": "web_search", "max_uses": 3},
+                {"type": web_search_type, "name": "web_search", "max_uses": 3},
                 SUBMIT_RESULT_TOOL,
             ],
             messages=[{"role": "user", "content": prompt}],
@@ -124,7 +131,7 @@ def research_company(profile: dict) -> dict:
         # published effort-sweep results, without a measurable accuracy
         # hit. Haiku 4.5 doesn't accept this parameter at all (errors) —
         # only add it for models that do.
-        if "haiku" not in config.ANTHROPIC_MODEL:
+        if not is_haiku:
             request_kwargs["output_config"] = {"effort": "medium"}
 
         response = client.messages.create(**request_kwargs)
