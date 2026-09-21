@@ -89,17 +89,17 @@ def main():
         logger.info("Stop-loss/take-profit actions: %s", sell_results)
 
     try:
-        picks = pick_top_stocks()
+        picks, full_shortlist = pick_top_stocks()
     except Exception:
         logger.exception("Failed to pick stocks — aborting this run, no orders placed.")
         sys.exit(1)
 
     if not picks:
         logger.warning("No stocks were picked. Nothing to buy today.")
-        history.record_report(picks, sell_results, market_open=True, mode=mode)
+        history.record_report(picks, sell_results, market_open=True, mode=mode, full_shortlist=full_shortlist)
         return
 
-    history.record_report(picks, sell_results, market_open=True, mode=mode)
+    history.record_report(picks, sell_results, market_open=True, mode=mode, full_shortlist=full_shortlist)
 
     results = {}
     for pick in picks:
@@ -111,6 +111,8 @@ def main():
                 "order_id": order.get("id"),
                 "final_score": pick["final_score"],
                 "ai_summary": pick["ai_summary"],
+                "scored_price": pick["price"],
+                "filled_avg_price": order.get("filled_avg_price"),
             }
         except Exception as exc:
             logger.exception("Order failed for %s", symbol)

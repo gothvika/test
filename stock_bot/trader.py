@@ -5,16 +5,53 @@ take-profit).
 """
 
 import logging
+import time
 import requests
 import config
 
 logger = logging.getLogger("stock_bot.trader")
 
 
+def _wait_for_fill(order: dict, max_attempts: int = 3, delay_seconds: float = 1.0) -> dict:
+    """
+    Market orders usually fill within a second or two, but the initial
+    POST /v2/orders response can still show status="accepted" with no
+    fill price yet. Polls the order a few times to try to capture the
+    actual fill price — needed to measure real execution slippage against
+    the price the scoring pipeline saw when it picked the stock, which
+    was flagged as a real, previously-unmeasured cost on these low-volume
+    names. Never raises, and just returns whatever the API last gave
+    rather than blocking a run over a slow or partial fill.
+    """
+    order_id = order.get("id")
+    if not order_id or order.get("filled_avg_price"):
+        return order
+
+    url = f"{config.ALPACA_TRADING_BASE_URL}/v2/orders/{order_id}"
+    headers = {
+        "APCA-API-KEY-ID": config.ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": config.ALPACA_SECRET_KEY,
+    }
+    for _ in range(max_attempts):
+        time.sleep(delay_seconds)
+        try:
+            resp = requests.get(url, headers=headers, timeout=15)
+            resp.raise_for_status()
+            order = resp.json()
+        except Exception:
+            logger.warning("Failed to poll order %s for fill price", order_id)
+            break
+        if order.get("filled_avg_price"):
+            break
+    return order
+
+
 def buy_dollar_amount(symbol: str, dollars: float) -> dict:
     """
     Submits a market buy order for a fixed dollar amount (fractional share).
-    Returns the order response JSON. Raises on HTTP error.
+    Returns the order response JSON, with filled_avg_price populated if the
+    order filled within _wait_for_fill's polling window. Raises on HTTP
+    error from the initial order submission.
     """
     url = f"{config.ALPACA_TRADING_BASE_URL}/v2/orders"
     headers = {
@@ -35,8 +72,12 @@ def buy_dollar_amount(symbol: str, dollars: float) -> dict:
         logger.error("Order failed for %s: %s — %s", symbol, resp.status_code, resp.text)
         resp.raise_for_status()
 
-    order = resp.json()
-    logger.info("Order submitted: %s $%.2f -> order id %s", symbol, dollars, order.get("id"))
+    order = _wait_for_fill(resp.json())
+    filled_price = order.get("filled_avg_price")
+    if filled_price:
+        logger.info("Order submitted: %s $%.2f -> order id %s, filled @ $%s", symbol, dollars, order.get("id"), filled_price)
+    else:
+        logger.info("Order submitted: %s $%.2f -> order id %s (fill price not yet available)", symbol, dollars, order.get("id"))
     return order
 
 

@@ -76,7 +76,7 @@ def test_report_shows_confirm_form_when_market_open_and_not_run_today(client):
          patch("app.check_market_open", return_value=True), \
          patch("app._already_ran_today", return_value=False), \
          patch("app.apply_stop_loss_and_take_profit", return_value={}), \
-         patch("app.pick_top_stocks", return_value=FAKE_PICKS):
+         patch("app.pick_top_stocks", return_value=(FAKE_PICKS, FAKE_PICKS)):
         resp = client.post("/report")
 
     assert resp.status_code == 200
@@ -92,7 +92,7 @@ def test_report_disables_confirm_when_market_closed(client):
          patch.object(config, "FMP_API_KEY", "key"), \
          patch("app.check_market_open", return_value=False), \
          patch("app._already_ran_today", return_value=False), \
-         patch("app.pick_top_stocks", return_value=FAKE_PICKS):
+         patch("app.pick_top_stocks", return_value=(FAKE_PICKS, FAKE_PICKS)):
         resp = client.post("/report")
 
     assert resp.status_code == 200
@@ -108,7 +108,7 @@ def test_execute_places_orders_for_cached_picks(client):
          patch("app.check_market_open", return_value=True), \
          patch("app._already_ran_today", return_value=False), \
          patch("app.apply_stop_loss_and_take_profit", return_value={}), \
-         patch("app.pick_top_stocks", return_value=FAKE_PICKS):
+         patch("app.pick_top_stocks", return_value=(FAKE_PICKS, FAKE_PICKS)):
         report_resp = client.post("/report")
 
     run_id = list(app_module._last_report.keys())[0]

@@ -205,7 +205,7 @@ def report():
         sell_results = apply_stop_loss_and_take_profit()
 
     try:
-        picks = pick_top_stocks()
+        picks, full_shortlist = pick_top_stocks()
     except Exception as exc:
         logger.exception("Failed to pick stocks")
         return render_template("error.html", message=f"Failed to generate picks: {exc}")
@@ -214,7 +214,7 @@ def report():
     _last_report.clear()  # only the most recent report is ever valid
     _last_report[run_id] = {"picks": picks, "sell_results": sell_results}
 
-    history.record_report(picks, sell_results, market_open, _mode())
+    history.record_report(picks, sell_results, market_open, _mode(), full_shortlist=full_shortlist)
 
     return render_template(
         "report.html",
@@ -262,6 +262,8 @@ def execute():
                 "status": "submitted",
                 "order_id": order.get("id"),
                 "final_score": pick["final_score"],
+                "scored_price": pick["price"],
+                "filled_avg_price": order.get("filled_avg_price"),
             }
         except Exception as exc:
             logger.exception("Order failed for %s", symbol)

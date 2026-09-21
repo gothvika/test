@@ -111,10 +111,14 @@ def test_pick_top_stocks_excludes_negative_roe_crypto_and_etf():
          patch.object(config, "SHORTLIST_SIZE", 5), \
          patch.object(config, "NUM_STOCKS", 5):
 
-        picks = scorer.pick_top_stocks()
+        picks, full_shortlist = scorer.pick_top_stocks()
         picked_symbols = {p["symbol"] for p in picks}
+        shortlist_symbols = {p["symbol"] for p in full_shortlist}
 
     assert picked_symbols == {"GOOD", "OTHER"}
+    # full_shortlist is everything that survived hard exclusions, before
+    # truncating to NUM_STOCKS — same set here since both make the cut.
+    assert shortlist_symbols == {"GOOD", "OTHER"}
 
 
 # --- movers merge in stage 1 --------------------------------------------------

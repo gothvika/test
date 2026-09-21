@@ -80,3 +80,36 @@ def test_position_fetch_failure_returns_empty_without_raising():
         results = trader.apply_stop_loss_and_take_profit()
 
     assert results == {}
+
+
+def test_buy_dollar_amount_captures_immediate_fill_price():
+    post_resp = _mock_response({"id": "o1", "filled_avg_price": "12.34"})
+    with patch("trader.requests.post", return_value=post_resp), \
+         patch("trader.requests.get") as mock_get:
+        order = trader.buy_dollar_amount("GOOD", 2.0)
+
+    assert order["filled_avg_price"] == "12.34"
+    mock_get.assert_not_called()  # already filled — no need to poll
+
+
+def test_buy_dollar_amount_polls_for_delayed_fill_price():
+    post_resp = _mock_response({"id": "o2", "filled_avg_price": None})
+    filled_resp = _mock_response({"id": "o2", "filled_avg_price": "5.00"})
+    with patch("trader.requests.post", return_value=post_resp), \
+         patch("trader.requests.get", return_value=filled_resp), \
+         patch("trader.time.sleep"):
+        order = trader.buy_dollar_amount("GOOD", 2.0)
+
+    assert order["filled_avg_price"] == "5.00"
+
+
+def test_buy_dollar_amount_gives_up_after_max_attempts_without_raising():
+    post_resp = _mock_response({"id": "o3", "filled_avg_price": None})
+    still_pending_resp = _mock_response({"id": "o3", "filled_avg_price": None})
+    with patch("trader.requests.post", return_value=post_resp), \
+         patch("trader.requests.get", return_value=still_pending_resp) as mock_get, \
+         patch("trader.time.sleep"):
+        order = trader.buy_dollar_amount("GOOD", 2.0)
+
+    assert order["filled_avg_price"] is None
+    assert mock_get.call_count == 3  # max_attempts, then gives up

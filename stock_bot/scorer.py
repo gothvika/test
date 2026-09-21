@@ -142,11 +142,17 @@ def _stage1_shortlist(pool_size: int, shortlist_size: int) -> tuple[list[str], d
     return shortlist, stage1_scores
 
 
-def pick_top_stocks(num_stocks: int = None) -> list[dict]:
+def pick_top_stocks(num_stocks: int = None) -> tuple[list[dict], list[dict]]:
     """
-    Returns a list of dicts (best first), each:
+    Returns (top, full_shortlist) — both lists of dicts (best first), each:
       {symbol, final_score, price, volume_score, mention_score, mention_count,
-       momentum_score, momentum_pct, roe, roe_score, ai_score, ai_summary}
+       momentum_score, momentum_pct, roe, roe_score, ai_score, ai_summary, ai_sources}
+
+    `top` is the num_stocks actually meant to be bought. `full_shortlist`
+    is every symbol that survived the hard exclusions and got AI-researched
+    (i.e. before truncating to num_stocks) — kept around so callers can log
+    it and later check whether the ranking actually added value over the
+    rest of the shortlist, not just whether the top picks went up or down.
     """
     num_stocks = num_stocks or config.NUM_STOCKS
 
@@ -276,4 +282,4 @@ def pick_top_stocks(num_stocks: int = None) -> list[dict]:
             roe_str, row["ai_score"], row["ai_summary"][:100],
         )
 
-    return top
+    return top, combined

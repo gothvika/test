@@ -28,8 +28,19 @@ def _file_for(day: str) -> str:
     return os.path.join(HISTORY_DIR, f"{day}.json")
 
 
-def record_report(picks: list, sell_results: dict, market_open: bool, mode: str, day: str = None) -> None:
-    """Writes today's report record (picks + any stop-loss/take-profit sells)."""
+def record_report(
+    picks: list, sell_results: dict, market_open: bool, mode: str,
+    full_shortlist: list = None, day: str = None,
+) -> None:
+    """
+    Writes today's report record (picks + any stop-loss/take-profit
+    sells). full_shortlist — every symbol that survived exclusions and
+    got AI-researched, before truncating to the top picks (see
+    scorer.pick_top_stocks) — is kept alongside `picks` so
+    review_history.py can later check whether the ranking actually added
+    value over the rest of the shortlist, not just whether the top picks
+    went up or down.
+    """
     day = day or date.today().isoformat()
     os.makedirs(HISTORY_DIR, exist_ok=True)
     record = {
@@ -38,6 +49,7 @@ def record_report(picks: list, sell_results: dict, market_open: bool, mode: str,
         "market_open": market_open,
         "sell_results": sell_results,
         "picks": picks,
+        "full_shortlist": full_shortlist or [],
         "executed": False,
         "execution": None,
     }
