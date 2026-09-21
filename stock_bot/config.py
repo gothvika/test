@@ -53,6 +53,13 @@ Optional:
                             (needs a paid market-data subscription)
   MAX_STOCK_PRICE         - only consider stocks trading below this price,
                             default 30.00
+  MIN_STOCK_PRICE         - only consider stocks trading at or above this
+                            price, default 2.00. Added after live testing
+                            of the movers screener showed 8/10 "top
+                            gainers" were sub-$1 penny stocks/warrants
+                            with huge but illiquid-noise percentage swings
+                            (e.g. +2967% on a $0.007 warrant) — exactly
+                            the opposite of "grounded, proven" businesses.
   MOMENTUM_LOOKBACK_DAYS  - trading-day window used to compute price
                             momentum (% change), default 20 (~1 month)
   WEIGHT_VOLUME           - default 0.10. NOTE: lower volume scores
@@ -142,6 +149,7 @@ MOVERS_POOL_SIZE = int(os.getenv("MOVERS_POOL_SIZE", "25"))
 NEWS_ARTICLES_PER_SYMBOL = int(os.getenv("NEWS_ARTICLES_PER_SYMBOL", "4"))
 
 MAX_STOCK_PRICE = float(os.getenv("MAX_STOCK_PRICE", "30.00"))
+MIN_STOCK_PRICE = float(os.getenv("MIN_STOCK_PRICE", "2.00"))
 MOMENTUM_LOOKBACK_DAYS = int(os.getenv("MOMENTUM_LOOKBACK_DAYS", "20"))
 
 WEIGHT_VOLUME = float(os.getenv("WEIGHT_VOLUME", "0.10"))

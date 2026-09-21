@@ -147,6 +147,39 @@ def test_stage1_shortlist_includes_movers_not_in_actives():
     assert "CCC" in shortlist
 
 
+def test_stage1_shortlist_excludes_penny_stocks_below_min_price():
+    # Grounded in real live data: Alpaca's movers screener returned mostly
+    # sub-$1 penny stocks/warrants (e.g. a warrant at $0.0071 up "2967%")
+    # when tested live — illiquid noise, not real momentum.
+    def fake_get_most_active_stocks(limit=None):
+        return ["GOODCO"]
+
+    def fake_get_top_movers(limit=None):
+        return ["PENNYW"]
+
+    def fake_get_latest_prices(symbols):
+        return {"GOODCO": 10.0, "PENNYW": 0.007}
+
+    def fake_get_x_mentions(symbols):
+        return Counter({s: 1 for s in symbols})
+
+    def fake_get_momentum(symbols):
+        return {s: 0.01 for s in symbols}
+
+    with patch("scorer.get_most_active_stocks", fake_get_most_active_stocks), \
+         patch("scorer.get_top_movers", fake_get_top_movers), \
+         patch("scorer.get_latest_prices", fake_get_latest_prices), \
+         patch("scorer.get_x_mentions", fake_get_x_mentions), \
+         patch("scorer.get_momentum", fake_get_momentum), \
+         patch.object(config, "MIN_STOCK_PRICE", 2.0), \
+         patch.object(config, "MAX_STOCK_PRICE", 100.0):
+
+        shortlist, _ = scorer._stage1_shortlist(pool_size=10, shortlist_size=10)
+
+    assert "PENNYW" not in shortlist
+    assert "GOODCO" in shortlist
+
+
 def test_stage1_shortlist_dedupes_movers_already_in_actives():
     def fake_get_most_active_stocks(limit=None):
         return ["AAA", "BBB"]

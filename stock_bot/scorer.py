@@ -2,9 +2,12 @@
 Two-stage scoring, targeting cheap, lower-volume, quality-momentum stocks:
 
   Stage 1 (cheap, broad): pull Alpaca's active-stock pool AND today's top
-  gainers (movers), keep only names priced under MAX_STOCK_PRICE, then
-  rank the survivors by a blend of (inverted) trading volume, X mentions,
-  and price momentum; keep the top SHORTLIST_SIZE.
+  gainers (movers), keep only names priced in [MIN_STOCK_PRICE,
+  MAX_STOCK_PRICE) — the floor exists because the movers screener's "top
+  gainers" turned out to be mostly sub-$1 penny stocks/warrants with
+  illiquid-noise percentage swings, not real momentum — then rank the
+  survivors by a blend of (inverted) trading volume, X mentions, and
+  price momentum; keep the top SHORTLIST_SIZE.
 
   Stage 2 (deeper, narrow): for just the shortlist, pull fundamentals
   (value/CEO/sector/ROE) and recent news, hard-exclude ETFs/negative-ROE/
@@ -88,15 +91,17 @@ def _stage1_shortlist(pool_size: int, shortlist_size: int) -> tuple[list[str], d
     prices = get_latest_prices(all_symbols)
     candidates = [
         sym for sym in all_symbols
-        if prices.get(sym) is not None and prices[sym] < config.MAX_STOCK_PRICE
+        if prices.get(sym) is not None
+        and config.MIN_STOCK_PRICE <= prices[sym] < config.MAX_STOCK_PRICE
     ]
     if not candidates:
         raise RuntimeError(
-            f"No candidates under ${config.MAX_STOCK_PRICE:.2f} found in today's active pool."
+            f"No candidates in [${config.MIN_STOCK_PRICE:.2f}, ${config.MAX_STOCK_PRICE:.2f}) "
+            f"found in today's active pool."
         )
     logger.info(
-        "Price filter (<$%.2f) kept %d/%d candidates",
-        config.MAX_STOCK_PRICE, len(candidates), len(all_symbols),
+        "Price filter ($%.2f-$%.2f) kept %d/%d candidates",
+        config.MIN_STOCK_PRICE, config.MAX_STOCK_PRICE, len(candidates), len(all_symbols),
     )
 
     mention_counts = get_x_mentions(candidates)
@@ -257,7 +262,10 @@ def pick_top_stocks(num_stocks: int = None) -> list[dict]:
     combined.sort(key=lambda row: row["final_score"], reverse=True)
     top = combined[:num_stocks]
 
-    logger.info("=== Final top %d picks (price < $%.2f) ===", len(top), config.MAX_STOCK_PRICE)
+    logger.info(
+        "=== Final top %d picks (price $%.2f-$%.2f) ===",
+        len(top), config.MIN_STOCK_PRICE, config.MAX_STOCK_PRICE,
+    )
     for row in top:
         roe_str = f"{row['roe']:.1%}" if row["roe"] is not None else "n/a"
         momentum_str = f"{row['momentum_pct']:+.1%}" if row["momentum_pct"] is not None else "n/a"
