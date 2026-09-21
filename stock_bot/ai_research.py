@@ -66,9 +66,10 @@ SUBMIT_RESULT_TOOL = {
 }
 
 PROMPT_TEMPLATE = """You are helping evaluate a stock for a small, automated \
-daily $1 purchase (part of a diversified basket of 10 stocks, not a large bet). \
-This bot specifically targets lower-priced, lower-volume stocks with strong \
-return on equity and positive price momentum.
+daily ${dollars_per_stock:.2f} purchase (part of a diversified basket of \
+{num_stocks} stocks, not a large bet). This bot specifically targets \
+lower-priced, lower-volume stocks with strong return on equity and \
+positive price momentum.
 
 Company: {name} ({symbol})
 Sector / industry: {sector} / {industry}
@@ -129,6 +130,8 @@ def research_company(profile: dict) -> dict:
     roe = profile.get("roe")
     momentum_pct = profile.get("momentum_pct")
     prompt = PROMPT_TEMPLATE.format(
+        dollars_per_stock=config.DOLLARS_PER_STOCK,
+        num_stocks=config.NUM_STOCKS,
         name=profile.get("name") or symbol,
         symbol=symbol,
         sector=profile.get("sector") or "unknown",

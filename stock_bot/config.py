@@ -31,7 +31,7 @@ Required environment variables:
                             fundamentals: market cap, P/E, sector, CEO name
 
 Optional:
-  DOLLARS_PER_STOCK      - default 1.00
+  DOLLARS_PER_STOCK      - default 2.00
   NUM_STOCKS             - default 10
   CANDIDATE_POOL_SIZE    - how many "most active" symbols to pull before
                             scoring, default 50
@@ -141,7 +141,7 @@ FMP_API_KEY = os.getenv("FMP_API_KEY", "")
 # Aug 2025) and 403 otherwise; /stable/ is the current, freely-accessible base.
 FMP_BASE_URL = "https://financialmodelingprep.com/stable"
 
-DOLLARS_PER_STOCK = float(os.getenv("DOLLARS_PER_STOCK", "1.00"))
+DOLLARS_PER_STOCK = float(os.getenv("DOLLARS_PER_STOCK", "2.00"))
 NUM_STOCKS = int(os.getenv("NUM_STOCKS", "10"))
 CANDIDATE_POOL_SIZE = int(os.getenv("CANDIDATE_POOL_SIZE", "50"))
 SHORTLIST_SIZE = int(os.getenv("SHORTLIST_SIZE", "12"))
